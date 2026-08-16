@@ -16,6 +16,10 @@ import {
   extractCoreConditionsFromText,
   PREFERENCE_OPTIONS,
 } from "@/lib/data/recommend-tags";
+import {
+  mergeNegativeConstraints,
+  stripExcludedFromTopics,
+} from "@/lib/data/recommend/negative-constraints";
 import type {
   ReadingDepth,
   RecommendRequest,
@@ -55,6 +59,9 @@ const SYSTEM_PROMPT = `你是阅读需求解析器。产品用户均为游戏行
   "difficulty": "light" | "medium" | "deep" | null,
   "time": "15" | "30" | "60" | "90" | null,
   "exclusions": string[],
+  "excludedTopics": string[],
+  "excludedKeywords": string[],
+  "excludedConcepts": string[],
   "intentConfidence": number
 }
 4. topics：只能来自正式题材 taxonomy（关卡设计、游戏设计、建筑、美术、编程、叙事…）。0–3 个。
@@ -70,11 +77,17 @@ const SYSTEM_PROMPT = `你是阅读需求解析器。产品用户均为游戏行
    未说明必须 null（不要用画像猜，禁止默认工作调研）。
 7. styles：仅用户明确表达（案例优先/理论优先/少理论/跨领域/实操）；未提及必须 []。
 8. difficulty / time：未提及则 null。
-9. exclusions：明确不要的；未提及则 []。
-10. intentConfidence：0–1。宽短题材宜 ≤0.45；信息充分 0.7–1。
-11. 不要输出 searchQueries / books / recommendations / ranking。
-12. 画像不得压过用户本轮明确说的题材与偏好；明确手选条件必须尊重。
-13. 区分：用户没说的内容不要写进 topics/keywords/goal/styles（后续系统会标为 inferred；宽 query 会直接丢掉）。`;
+9. exclusions：粗粒度不要项（如英文、小说、重理论）；未提及则 []。
+10. 【负向约束 / negative constraints — 必须正确】
+   - 识别：「不要」「除了X以外/之外」「不想看」「排除」「避免」「不是X」等。
+   - excludedTopics：被排除的正式题材（须属 taxonomy）。例：「除了关卡设计以外…游戏设计」→ topics=["游戏设计"], excludedTopics=["关卡设计"]。
+   - excludedKeywords / excludedConcepts：被排除的自由词/概念（非 taxonomy）。
+   - 被排除的词【禁止】再写入 topics 或 keywords。
+   - 排除条件不是正向匹配加分项。
+11. intentConfidence：0–1。宽短题材宜 ≤0.45；信息充分 0.7–1。
+12. 不要输出 searchQueries / books / recommendations / ranking。
+13. 画像不得压过用户本轮明确说的题材与偏好；明确手选条件必须尊重。
+14. 区分：用户没说的内容不要写进 topics/keywords/goal/styles（后续系统会标为 inferred；宽 query 会直接丢掉）。`;
 
 function asStringArray(value: unknown, limit: number): string[] {
   if (!Array.isArray(value)) return [];
@@ -344,8 +357,19 @@ export function applyManualContextOverrides(
   base: Omit<StructuredDemandContext, "searchQueries">,
   input: RecommendRequest,
 ): Omit<StructuredDemandContext, "searchQueries"> {
-  let { topics, keywords, styles, difficulty, time, goal, goals, exclusions } =
-    base;
+  let {
+    topics,
+    keywords,
+    styles,
+    difficulty,
+    time,
+    goal,
+    goals,
+    exclusions,
+    excludedTopics = [],
+    excludedKeywords = [],
+    excludedConcepts = [],
+  } = base;
   goals = goals ?? (goal ? [goal] : []);
 
   if (input.themes !== undefined) {
@@ -373,12 +397,32 @@ export function applyManualContextOverrides(
     time = input.session_bucket;
   }
 
-  keywords = clampKeywords(keywords.filter((k) => !topics.includes(k)));
+  topics = stripExcludedFromTopics(topics, excludedTopics);
+  const banKw = new Set([
+    ...excludedTopics,
+    ...excludedKeywords,
+    ...excludedConcepts,
+  ]);
+  keywords = clampKeywords(
+    keywords.filter((k) => !topics.includes(k) && !banKw.has(k)),
+  );
   if (styles.includes("少理论") && !exclusions.includes("重理论")) {
     exclusions = [...exclusions, "重理论"];
   }
 
-  return { topics, keywords, styles, difficulty, time, goal, goals, exclusions };
+  return {
+    topics,
+    keywords,
+    styles,
+    difficulty,
+    time,
+    goal,
+    goals,
+    exclusions,
+    excludedTopics,
+    excludedKeywords,
+    excludedConcepts,
+  };
 }
 
 /**
@@ -396,6 +440,25 @@ export function isValidStructuredDemand(
   if (demand.topics.length === 0 && demand.keywords.length === 0) return false;
   if (!Array.isArray(demand.styles)) return false;
   if (!Array.isArray(demand.exclusions)) return false;
+  if (
+    demand.excludedTopics != null &&
+    (!Array.isArray(demand.excludedTopics) ||
+      !demand.excludedTopics.every((t) => TAXONOMY.has(t)))
+  ) {
+    return false;
+  }
+  if (
+    demand.excludedKeywords != null &&
+    !Array.isArray(demand.excludedKeywords)
+  ) {
+    return false;
+  }
+  if (
+    demand.excludedConcepts != null &&
+    !Array.isArray(demand.excludedConcepts)
+  ) {
+    return false;
+  }
   if (!Array.isArray(demand.searchQueries) || demand.searchQueries.length === 0) {
     return false;
   }
@@ -450,16 +513,38 @@ export function normalizeStructuredDemand(
     "";
 
   const goal = normalizeGoal(obj.goal);
+  const promptNegatives = extractCoreConditionsFromText(promptText);
+  const negatives = mergeNegativeConstraints(
+    {
+      excludedTopics: asStringArray(obj.excludedTopics, 6).filter((t) =>
+        TAXONOMY.has(t),
+      ),
+      excludedKeywords: asStringArray(obj.excludedKeywords, 8),
+      excludedConcepts: asStringArray(obj.excludedConcepts, 8),
+    },
+    {
+      excludedTopics: promptNegatives.excludedTopics,
+      excludedKeywords: promptNegatives.excludedKeywords,
+      excludedConcepts: promptNegatives.excludedConcepts,
+    },
+  );
+
   let overridden = applyManualContextOverrides(
     {
-      topics: split.topics,
-      keywords: split.keywords,
+      topics: stripExcludedFromTopics(split.topics, negatives.excludedTopics),
+      keywords: split.keywords.filter(
+        (k) =>
+          !negatives.excludedTopics.includes(k) &&
+          !negatives.excludedKeywords.includes(k) &&
+          !negatives.excludedConcepts.includes(k),
+      ),
       styles,
       difficulty: normalizeDifficulty(obj.difficulty),
       time: normalizeTime(obj.time),
       goal,
       goals: goal ? [goal] : [],
       exclusions: asStringArray(obj.exclusions, 6),
+      ...negatives,
     },
     input,
   );
@@ -582,6 +667,9 @@ function rulesFallback(
         difficulty: demand.difficulty,
         time: demand.time,
         exclusions: demand.exclusions,
+        excludedTopics: demand.excludedTopics,
+        excludedKeywords: demand.excludedKeywords,
+        excludedConcepts: demand.excludedConcepts,
       },
       input,
     );

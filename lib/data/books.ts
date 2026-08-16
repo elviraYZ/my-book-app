@@ -53,7 +53,8 @@ function buildDetail(
     ],
     content_intro: base.description ?? null,
     takeaways: base.tags.slice(0, 4).map((tag) => `围绕「${tag}」的可迁移要点`),
-    toc: ["开篇导读", "核心概念", "方法与案例", "练习与清单", "延伸阅读"],
+    // 库内暂无真实目录字段，勿注入占位章节
+    toc: [],
     scenarios: [
       ...base.tags.slice(0, 2).map((t) => `${t}相关项目`),
       sessionLabel ?? "碎片阅读时段",

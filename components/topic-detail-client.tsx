@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   BookMarked,
-  Clock3,
   FolderOpen,
   GitBranch,
   Loader2,
@@ -14,15 +13,18 @@ import {
   RefreshCw,
   Search,
   Sparkles,
-  Star,
-  Target,
   Trash2,
-  Waypoints,
   X,
 } from "lucide-react";
 
 import { BookmarkButton } from "@/components/bookmark-button";
+import { BookCover } from "@/components/book-cover";
 import { NewSearchButton } from "@/components/new-search-provider";
+import {
+  isAbortError,
+  RecommendLoadingOverlay,
+  useEstimatedRecommendProgress,
+} from "@/components/recommend-loading-overlay";
 import { SiteHeader } from "@/components/site-header";
 import { bookDetailHref } from "@/lib/book-links";
 import {
@@ -48,11 +50,7 @@ import { TOPIC_ICONS } from "@/lib/topic-icons";
 import type { ReadingDepth, Topic, TopicBook } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-type SectionId =
-  | "overview"
-  | "bookmarked"
-  | "recommend"
-  | "related";
+type SectionId = "overview" | "bookmarked" | "recommend" | "related";
 
 function sessionLabel(topic: Topic) {
   if (topic.context.session_bucket) {
@@ -68,28 +66,6 @@ function sessionLabel(topic: Topic) {
     );
   }
   return "不限";
-}
-
-function Cover({
-  title,
-  color,
-  className,
-}: {
-  title: string;
-  color?: string;
-  className?: string;
-}) {
-  return (
-    <div
-      className={cn(
-        "flex aspect-[2/3] shrink-0 items-end justify-center rounded-lg px-1 pb-1.5 text-center text-[8px] font-semibold leading-tight text-white",
-        className,
-      )}
-      style={{ backgroundColor: color ?? "#64748b" }}
-    >
-      {title.slice(0, 6)}
-    </div>
-  );
 }
 
 function BookmarkedCard({
@@ -120,10 +96,12 @@ function BookmarkedCard({
         }}
         className="flex w-full flex-col gap-2 text-left disabled:cursor-not-allowed disabled:opacity-50"
       >
-        <Cover
+        <BookCover
           title={title}
+          coverUrl={book?.cover_url}
           color={book?.cover_color}
           className="w-full rounded-lg text-[9px] shadow-sm"
+          titleChars={6}
         />
         <div className="min-w-0 space-y-1 px-0.5 pr-8">
           <h4 className="line-clamp-2 text-[13px] leading-snug font-semibold text-[#1F2937]">
@@ -189,17 +167,21 @@ function RecommendRow({
         }}
         className="flex min-w-0 flex-1 gap-3 text-left disabled:cursor-not-allowed disabled:opacity-50"
       >
-        <Cover
+        <BookCover
           title={title}
+          coverUrl={book?.cover_url}
           color={book?.cover_color}
-          className="w-[3.25rem] text-[8px] shadow-sm sm:w-14"
+          className="w-[3.25rem] rounded-lg text-[8px] shadow-sm sm:w-14"
+          titleChars={6}
         />
         <div className="min-w-0 flex-1 space-y-1.5">
           <div className="min-w-0">
             <h4 className="truncate text-[14px] font-semibold text-[#1F2937]">
               {title}
             </h4>
-            <p className="truncate text-[12px] text-[#8B95A8]">{book?.author}</p>
+            <p className="truncate text-[12px] text-[#8B95A8]">
+              {book?.author}
+            </p>
           </div>
           {tags.length > 0 ? (
             <div className="flex flex-wrap gap-1">
@@ -269,6 +251,7 @@ export function TopicDetailClient({
   const recommendPanelRef = useRef<HTMLElement | null>(null);
   const composeTextRef = useRef<HTMLTextAreaElement>(null);
   const shouldScrollToRecommend = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   const [topic, setTopic] = useState(initialTopic);
   const [items, setItems] = useState(initialItems);
@@ -276,6 +259,13 @@ export function TopicDetailClient({
   const [deleting, setDeleting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [justUpdated, setJustUpdated] = useState(false);
+  const {
+    percent: regenPercent,
+    label: regenLabel,
+    overlayOpen: regenOverlayOpen,
+    finish: finishRegenProgress,
+    dismiss: dismissRegenProgress,
+  } = useEstimatedRecommendProgress(saving);
 
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeReady, setComposeReady] = useState(false);
@@ -348,7 +338,6 @@ export function TopicDetailClient({
   }, [section, items]);
 
   const Icon = TOPIC_ICONS[topic.icon ?? "loop"];
-  const tags = topic.context.themes?.slice(0, 4) ?? [];
 
   const bookmarked = useMemo(
     () => items.filter((i) => i.user_status === "bookmarked"),
@@ -443,18 +432,29 @@ export function TopicDetailClient({
       return;
     }
 
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    // 关掉编辑弹窗，改用可取消的推荐 loading
+    setComposeOpen(false);
     setSaving(true);
     setJustUpdated(false);
     try {
       const prompt = text || selectedThemes.join("、");
-      const data = await recommend({
-        prompt,
-        themes: selectedThemes,
-        preferences: selectedPreferences,
-        depth: selectedDepth || null,
-        session_bucket: selectedSession || null,
-        topic_id: topic.id,
-      });
+      const data = await recommend(
+        {
+          prompt,
+          themes: selectedThemes,
+          preferences: selectedPreferences,
+          depth: selectedDepth || null,
+          session_bucket: selectedSession || null,
+          topic_id: topic.id,
+        },
+        { signal: controller.signal },
+      );
+
+      if (controller.signal.aborted) return;
 
       const updated = await updateTopic(topic.id, {
         context_text: prompt,
@@ -465,28 +465,47 @@ export function TopicDetailClient({
         },
       });
 
+      if (controller.signal.aborted) return;
+
       const nextItems = await syncTopicRecommendations(topic.id, data.books);
+      if (controller.signal.aborted) return;
+
       const fresh = updated ?? (await getTopic(topic.id));
       if (fresh) {
         setTopic(fresh);
         syncEditorFromTopic(fresh);
       }
       setItems(nextItems);
-      setComposeOpen(false);
       shouldScrollToRecommend.current = true;
       setSection("recommend");
       setJustUpdated(true);
       window.setTimeout(() => setJustUpdated(false), 2800);
-    } catch {
+      await finishRegenProgress();
+    } catch (err) {
+      if (isAbortError(err) || controller.signal.aborted) {
+        dismissRegenProgress();
+        return;
+      }
+      dismissRegenProgress();
       window.alert("重新生成失败，请稍后重试");
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
       setSaving(false);
     }
   };
 
-  const onRegenerateClick = () => {
-    openCompose();
+  const cancelRegenerate = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    dismissRegenProgress();
+    setSaving(false);
   };
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   const navItems: {
     id: SectionId;
@@ -510,108 +529,156 @@ export function TopicDetailClient({
     { id: "related", label: "相关专题", icon: GitBranch },
   ];
 
-  const metaRows = [
-    {
-      icon: Target,
-      label: "阅读目标",
-      value: topic.context.goal || topic.context_text,
-    },
-    {
-      icon: Clock3,
-      label: "时间范围",
-      value: sessionLabel(topic),
-    },
-    {
-      icon: Waypoints,
-      label: "偏好设置",
-      value: (topic.context.preferences ?? []).join(" / ") || "综合",
-    },
-  ] as const;
+  const demandPreview = demandTextFromTopic(topic);
+  const themeList = clampThemes(topic.context.themes ?? []);
+  const preferenceList = clampPreferences(topic.context.preferences ?? []);
+  const keywordList = (topic.context.keywords ?? [])
+    .map((k) => k.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  const depthLabel =
+    DEPTH_OPTIONS.find((o) => o.value === topic.context.depth)?.label ?? null;
+  const timeLabel = sessionLabel(topic);
+  const goalList = (topic.context.goals ?? [])
+    .map((g) => g.trim())
+    .filter(Boolean);
+  // goal 若只是专题标题，不算独立「阅读目标」展示
+  const goalExtra = (topic.context.goal ?? "").trim();
+  const showGoal =
+    goalList.length > 0 ||
+    (goalExtra &&
+      goalExtra !== topic.title.trim() &&
+      goalExtra !== demandPreview.trim());
 
   const headerCard = (
     <section className="shrink-0 rounded-2xl border border-[#E6EAF2] bg-white px-5 py-5 shadow-[0_1px_2px_rgba(31,41,55,0.04)] sm:px-6 sm:py-5">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 items-start gap-3.5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="flex min-w-0 flex-1 items-start gap-3.5">
           <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-[#EDE9FE] text-[#5B4DFF] sm:size-14">
             <Icon className="size-6 sm:size-7" />
           </span>
           <div className="min-w-0 pt-0.5">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <h1 className="truncate text-[20px] font-bold tracking-tight text-[#111827] sm:text-[22px]">
                 {topic.title}
               </h1>
-              <Star className="size-4 shrink-0 stroke-[1.5] text-[#C5CAD6]" />
+              <span className="inline-flex items-center gap-1 rounded-md bg-[#F3F5F9] px-2 py-0.5 text-[11px] font-medium text-[#6B7280]">
+                <BookMarked className="size-3 text-[#5B6CFF]" />
+                收藏 {bookmarkedCount}
+              </span>
             </div>
-            {tags.length > 0 ? (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {tags.map((tag) => (
+            <p className="mt-1.5 text-[11px] text-[#9AA3B5]">
+              最近更新：
+              {(topic.updated_label ?? "最近").replace(/^更新于\s*/, "")}
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={openCompose}
+          disabled={saving}
+          className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 self-stretch rounded-xl bg-gradient-to-r from-[#7C6CFF] via-[#5B7CFF] to-[#2BB8A8] px-3.5 text-[12px] font-semibold text-white shadow-sm shadow-[#7C6CFF]/25 transition-opacity hover:opacity-95 disabled:opacity-50 sm:self-start"
+        >
+          <PencilLine className="size-3.5" />
+          编辑并重新生成
+        </button>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        <div className="rounded-xl border border-[#EEF1F6] bg-[#F8FAFC] px-3 py-2">
+          <p className="text-[11px] font-semibold text-[#8B95A8]">当前需求</p>
+          <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-[13px] leading-snug text-[#1F2937]">
+            {demandPreview || "（暂无需求原文）"}
+          </p>
+        </div>
+
+        {/* 主题 + 关键词一行 */}
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="rounded-xl border border-[#EEF1F6] px-3 py-2">
+            <p className="text-[11px] font-semibold text-[#8B95A8]">主题</p>
+            {themeList.length > 0 ? (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {themeList.map((tag) => (
                   <span
                     key={tag}
-                    className="rounded-md bg-[#F1F3F7] px-2 py-0.5 text-[11px] font-medium text-[#6B7280]"
+                    className="rounded-md bg-[#EEF2FF] px-1.5 py-0.5 text-[11px] font-medium text-[#4F5DFF]"
                   >
                     {tag}
                   </span>
                 ))}
               </div>
-            ) : null}
+            ) : (
+              <p className="mt-1.5 text-[12px] text-[#C5CAD6]">未选择</p>
+            )}
+          </div>
+          <div className="rounded-xl border border-[#EEF1F6] px-3 py-2">
+            <p className="text-[11px] font-semibold text-[#8B95A8]">关键词</p>
+            {keywordList.length > 0 ? (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {keywordList.map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-md bg-[#F3F5F9] px-1.5 py-0.5 text-[11px] font-medium text-[#5F6B7C]"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-1.5 text-[12px] text-[#C5CAD6]">未选择</p>
+            )}
           </div>
         </div>
 
-        <div className="shrink-0 sm:pt-0.5 sm:text-right">
-          <div className="px-1 text-center sm:px-0">
-            <p className="inline-flex items-center justify-center gap-1 text-[12px] font-medium text-[#6B7280]">
-              <BookMarked className="size-3.5 text-[#5B6CFF]" />
-              收藏
-            </p>
-            <p className="mt-1 text-[22px] leading-none font-bold text-[#111827]">
-              {bookmarkedCount}
+        {/* 其余条件一行 4 列 */}
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+          <div className="rounded-xl border border-[#EEF1F6] px-3 py-2">
+            <p className="text-[11px] font-semibold text-[#8B95A8]">内容偏好</p>
+            {preferenceList.length > 0 ? (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {preferenceList.map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-md bg-[#ECFDF5] px-1.5 py-0.5 text-[11px] font-medium text-[#0D9488]"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-1.5 text-[12px] text-[#C5CAD6]">未选择</p>
+            )}
+          </div>
+          <div className="rounded-xl border border-[#EEF1F6] px-3 py-2">
+            <p className="text-[11px] font-semibold text-[#8B95A8]">阅读投入</p>
+            <p className="mt-1.5 text-[13px] font-medium text-[#1F2937]">
+              {depthLabel ?? "不限"}
             </p>
           </div>
-          <p className="mt-2 text-[11px] text-[#9AA3B5]">
-            最近更新：
-            {(topic.updated_label ?? "最近").replace(/^更新于\s*/, "")}
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-5 flex flex-col gap-4 border-t border-[#EEF1F6] pt-1 lg:flex-row lg:items-stretch lg:gap-6">
-        <ul className="min-w-0 flex-1">
-          {metaRows.map((row) => {
-            const RowIcon = row.icon;
-            return (
-              <li
-                key={row.label}
-                className="flex items-start gap-2.5 border-b border-[#EEF1F6] py-3 last:border-b-0"
-              >
-                <RowIcon className="mt-0.5 size-4 shrink-0 text-[#7C8CFF]" />
-                <span className="w-[4.5rem] shrink-0 text-[13px] font-medium text-[#8B95A8]">
-                  {row.label}
-                </span>
-                <span className="min-w-0 flex-1 text-[13px] leading-relaxed text-[#1F2937]">
-                  {row.value}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-
-        <div className="flex shrink-0 flex-col justify-center gap-2.5 lg:w-[11.5rem]">
-          <button
-            type="button"
-            onClick={openCompose}
-            className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-[#C9D4FF] bg-white text-[13px] font-medium text-[#4F5DFF] transition-colors hover:bg-[#F5F7FF]"
-          >
-            <PencilLine className="size-3.5" />
-            编辑需求与条件
-          </button>
-          <button
-            type="button"
-            onClick={onRegenerateClick}
-            className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-[#7C6CFF] via-[#5B7CFF] to-[#2BB8A8] text-[13px] font-semibold text-white shadow-sm shadow-[#7C6CFF]/25 transition-opacity hover:opacity-95"
-          >
-            <Sparkles className="size-3.5" />
-            重新生成
-          </button>
+          <div className="rounded-xl border border-[#EEF1F6] px-3 py-2">
+            <p className="text-[11px] font-semibold text-[#8B95A8]">可用时间</p>
+            <p className="mt-1.5 text-[13px] font-medium text-[#1F2937]">
+              {timeLabel}
+            </p>
+          </div>
+          <div className="rounded-xl border border-[#EEF1F6] px-3 py-2">
+            <p className="text-[11px] font-semibold text-[#8B95A8]">阅读目标</p>
+            {showGoal ? (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {(goalList.length > 0 ? goalList : [goalExtra]).map((g) => (
+                  <span
+                    key={g}
+                    className="rounded-md bg-[#FFF7ED] px-1.5 py-0.5 text-[11px] font-medium text-[#C2410C]"
+                  >
+                    {g}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-1.5 text-[12px] text-[#C5CAD6]">未设置</p>
+            )}
+          </div>
         </div>
       </div>
     </section>
@@ -683,7 +750,7 @@ export function TopicDetailClient({
             专题说明
           </p>
           <p className="mt-1.5 text-[12px] leading-relaxed text-[#5B6B8C]">
-            在概览卡编辑原需求与条件后重新生成；已收藏书籍会保留。全新需求可直接开始新搜索。
+            在概览卡点「编辑并重新生成」更新书单；已收藏书籍会保留。全新需求可直接开始新搜索。
           </p>
           <NewSearchButton className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold text-[#4F5DFF] hover:underline">
             <Search className="size-3" />
@@ -734,10 +801,10 @@ export function TopicDetailClient({
               id="topic-compose-title"
               className="mt-0.5 text-[20px] font-bold tracking-tight text-[#111827] sm:text-[22px]"
             >
-              编辑需求与条件
+              编辑并重新生成
             </h2>
             <p className="mt-1 text-[12px] leading-relaxed text-[#6B7280]">
-              与推荐结果页相同：改文本、标签和阅读约束，再重新生成。已收藏书籍不受影响。
+              改文本、标签和阅读约束后点「重新生成」。已收藏书籍不受影响。
             </p>
           </div>
           <button
@@ -1014,17 +1081,19 @@ export function TopicDetailClient({
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-0.5">
               {recommended.length === 0 ? (
                 <p className="flex h-full items-center justify-center text-sm text-[#8B95A8]">
-                  暂无推荐，点右上角重新生成
+                  暂无推荐，点「编辑并重新生成」更新书单
                 </p>
               ) : (
-                recommended.slice(0, 4).map((item) => (
-                  <RecommendRow
-                    key={item.id}
-                    item={item}
-                    topicId={topic.id}
-                    onBookmarkChange={onBookmarkChange}
-                  />
-                ))
+                recommended
+                  .slice(0, 4)
+                  .map((item) => (
+                    <RecommendRow
+                      key={item.id}
+                      item={item}
+                      topicId={topic.id}
+                      onBookmarkChange={onBookmarkChange}
+                    />
+                  ))
               )}
             </div>
           </section>
@@ -1043,7 +1112,7 @@ export function TopicDetailClient({
             onClick={openCompose}
             className="text-[12px] font-semibold text-[#4F5DFF] hover:underline"
           >
-            编辑需求与条件
+            编辑并重新生成
           </button>
         </div>
         {bookmarked.length === 0 ? (
@@ -1198,6 +1267,13 @@ export function TopicDetailClient({
         </div>
       </div>
       {composeOverlay}
+      <RecommendLoadingOverlay
+        open={regenOverlayOpen}
+        percent={regenPercent}
+        label={regenLabel}
+        onCancel={cancelRegenerate}
+        hint="正在按当前条件重新生成专题推荐。取消后保留上一版结果。"
+      />
     </div>
   );
 }

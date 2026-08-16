@@ -1,4 +1,5 @@
 import type { ExploreBook, ExploreFilters, ReadingDepth } from "@/lib/types";
+import { GENRE_TAG_WHITELIST } from "@/lib/data/book-tags";
 import {
   DEPTH_OPTIONS,
   FILTER_SECTION_LABELS,
@@ -8,8 +9,9 @@ import {
 
 export type FilterOption = { value: string; label: string };
 
-/** 探索题材筛选项：展示文案 + 映射到书库正式 taxonomy */
+/** 探索题材筛选项：value/label 即书库正式题材（白名单） */
 export type GenreFilterOption = FilterOption & {
+  /** 匹配 book.tags；MVP 与 value 一致 */
   catalogTags: readonly string[];
 };
 
@@ -18,99 +20,95 @@ export type GenreFilterGroup = {
   options: readonly GenreFilterOption[];
 };
 
+function tagOpt(tag: (typeof GENRE_TAG_WHITELIST)[number]): GenreFilterOption {
+  return { value: tag, label: tag, catalogTags: [tag] };
+}
+
 /**
- * 探索侧栏题材分组（岗位向）。
- * value 用于 URL / 勾选状态；catalogTags 用于匹配 book.tags。
+ * 探索侧栏题材：按使用场景分组，每项直接对应正式白名单（无假精细别名）。
+ * 细粒度词留给 concepts / AI 搜索。
  */
 export const GENRE_FILTER_GROUPS: readonly GenreFilterGroup[] = [
   {
     title: "做设计",
     options: [
-      { value: "玩法", label: "玩法", catalogTags: ["游戏设计"] },
-      { value: "系统", label: "系统", catalogTags: ["游戏设计"] },
-      { value: "关卡", label: "关卡", catalogTags: ["关卡设计", "游戏设计"] },
-      { value: "数值", label: "数值", catalogTags: ["游戏设计"] },
-      { value: "机制", label: "机制", catalogTags: ["游戏设计"] },
-      { value: "叙事设计", label: "叙事设计", catalogTags: ["叙事", "游戏设计"] },
+      tagOpt("游戏设计"),
+      tagOpt("关卡设计"),
+      tagOpt("交互体验"),
+      tagOpt("设计思维"),
     ],
   },
   {
     title: "做内容",
     options: [
-      { value: "文案", label: "文案", catalogTags: ["叙事"] },
-      { value: "剧情", label: "剧情", catalogTags: ["叙事"] },
-      { value: "角色", label: "角色", catalogTags: ["叙事", "美术"] },
-      { value: "世界观", label: "世界观", catalogTags: ["叙事", "神话"] },
-      { value: "任务", label: "任务", catalogTags: ["游戏设计", "叙事"] },
-      {
-        value: "文化与历史参考",
-        label: "文化与历史参考",
-        catalogTags: ["神话", "叙事", "建筑"],
-      },
+      tagOpt("叙事"),
+      tagOpt("神话"),
+      tagOpt("科幻"),
+      tagOpt("悬疑"),
     ],
   },
   {
     title: "做视觉",
-    options: [
-      { value: "角色美术", label: "角色美术", catalogTags: ["美术"] },
-      { value: "场景", label: "场景", catalogTags: ["美术", "建筑"] },
-      { value: "美术设定", label: "美术设定", catalogTags: ["美术"] },
-      { value: "建筑", label: "建筑", catalogTags: ["建筑"] },
-      { value: "构图", label: "构图", catalogTags: ["美术"] },
-      { value: "色彩", label: "色彩", catalogTags: ["美术"] },
-      { value: "概念设计", label: "概念设计", catalogTags: ["美术"] },
-    ],
+    options: [tagOpt("美术"), tagOpt("建筑")],
   },
   {
     title: "做技术",
-    options: [
-      { value: "编程", label: "编程", catalogTags: ["编程"] },
-      { value: "引擎", label: "引擎", catalogTags: ["编程", "图形渲染", "游戏设计"] },
-      { value: "图形学", label: "图形学", catalogTags: ["图形渲染"] },
-      { value: "AI", label: "AI", catalogTags: ["人工智能"] },
-      { value: "渲染", label: "渲染", catalogTags: ["图形渲染"] },
-      { value: "动画", label: "动画", catalogTags: ["美术", "图形渲染"] },
-      { value: "技术美术", label: "技术美术", catalogTags: ["美术", "图形渲染", "编程"] },
-    ],
+    options: [tagOpt("编程"), tagOpt("人工智能"), tagOpt("图形渲染")],
   },
   {
     title: "做研究",
-    options: [
-      { value: "玩家研究", label: "玩家研究", catalogTags: ["交互体验", "心理学"] },
-      { value: "UX/HCI", label: "UX/HCI", catalogTags: ["交互体验", "设计思维"] },
-      { value: "心理学", label: "心理学", catalogTags: ["心理学"] },
-      { value: "认知", label: "认知", catalogTags: ["心理学"] },
-      { value: "用户研究", label: "用户研究", catalogTags: ["交互体验", "产品"] },
-      { value: "数据分析", label: "数据分析", catalogTags: ["产品", "经济"] },
-    ],
+    options: [tagOpt("心理学"), tagOpt("经济"), tagOpt("产品")],
   },
   {
     title: "做管理",
-    options: [
-      { value: "制作", label: "制作", catalogTags: ["管理", "游戏设计"] },
-      { value: "项目管理", label: "项目管理", catalogTags: ["管理"] },
-      { value: "团队协作", label: "团队协作", catalogTags: ["管理"] },
-      { value: "领导力", label: "领导力", catalogTags: ["管理"] },
-      { value: "商业化", label: "商业化", catalogTags: ["经济", "产品", "管理"] },
-    ],
-  },
-  {
-    title: "找灵感",
-    options: [
-      { value: "神话", label: "神话", catalogTags: ["神话"] },
-      { value: "历史", label: "历史", catalogTags: ["神话", "建筑", "叙事"] },
-      { value: "社会学", label: "社会学", catalogTags: ["心理学", "设计思维"] },
-      { value: "人类学", label: "人类学", catalogTags: ["心理学", "神话"] },
-      { value: "科幻", label: "科幻", catalogTags: ["科幻"] },
-      { value: "文学", label: "文学", catalogTags: ["叙事", "科幻", "悬疑"] },
-      {
-        value: "跨领域参考",
-        label: "跨领域参考",
-        catalogTags: ["设计思维", "建筑", "美术"],
-      },
-    ],
+    options: [tagOpt("管理")],
   },
 ] as const;
+
+/**
+ * 旧版 UI 别名 → 正式题材（兼容 URL ?genres=玩法,AI）
+ */
+const LEGACY_GENRE_ALIASES: Record<string, string> = {
+  玩法: "游戏设计",
+  系统: "游戏设计",
+  数值: "游戏设计",
+  机制: "游戏设计",
+  关卡: "关卡设计",
+  叙事设计: "叙事",
+  文案: "叙事",
+  剧情: "叙事",
+  角色: "叙事",
+  世界观: "叙事",
+  任务: "游戏设计",
+  文化与历史参考: "神话",
+  角色美术: "美术",
+  场景: "美术",
+  美术设定: "美术",
+  构图: "美术",
+  色彩: "美术",
+  概念设计: "美术",
+  引擎: "编程",
+  图形学: "图形渲染",
+  AI: "人工智能",
+  渲染: "图形渲染",
+  动画: "美术",
+  技术美术: "美术",
+  玩家研究: "交互体验",
+  "UX/HCI": "交互体验",
+  认知: "心理学",
+  用户研究: "交互体验",
+  数据分析: "产品",
+  制作: "管理",
+  项目管理: "管理",
+  团队协作: "管理",
+  领导力: "管理",
+  商业化: "经济",
+  历史: "神话",
+  社会学: "心理学",
+  人类学: "心理学",
+  文学: "叙事",
+  跨领域参考: "设计思维",
+};
 
 const GENRE_OPTION_BY_VALUE = new Map<string, GenreFilterOption>();
 for (const group of GENRE_FILTER_GROUPS) {
@@ -119,10 +117,32 @@ for (const group of GENRE_FILTER_GROUPS) {
   }
 }
 
-/** 勾选值 → 书库 tags（兼容旧 URL 里直接写的 taxonomy） */
+const WHITELIST_SET = new Set<string>(GENRE_TAG_WHITELIST);
+
+/** 规范化题材筛选取值（别名 → 白名单；去重） */
+export function normalizeGenreFilterValues(values: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const v = raw.trim();
+    if (!v) continue;
+    const mapped = LEGACY_GENRE_ALIASES[v] ?? v;
+    if (!WHITELIST_SET.has(mapped) && !GENRE_OPTION_BY_VALUE.has(mapped)) {
+      continue;
+    }
+    if (seen.has(mapped)) continue;
+    seen.add(mapped);
+    out.push(mapped);
+  }
+  return out;
+}
+
+/** 勾选值 → 书库 tags */
 export function catalogTagsForGenreFilter(value: string): string[] {
-  const opt = GENRE_OPTION_BY_VALUE.get(value);
+  const normalized = LEGACY_GENRE_ALIASES[value] ?? value;
+  const opt = GENRE_OPTION_BY_VALUE.get(normalized);
   if (opt) return [...opt.catalogTags];
+  if (WHITELIST_SET.has(normalized)) return [normalized];
   return [value];
 }
 
@@ -134,8 +154,9 @@ function genreMatchesBook(bookTags: string[], genreValue: string): boolean {
 }
 
 export function genreGroupTitleForValue(value: string): string | null {
+  const normalized = LEGACY_GENRE_ALIASES[value] ?? value;
   for (const group of GENRE_FILTER_GROUPS) {
-    if (group.options.some((o) => o.value === value)) return group.title;
+    if (group.options.some((o) => o.value === normalized)) return group.title;
   }
   return null;
 }
@@ -249,8 +270,11 @@ export function countActiveFilters(filters: ExploreFilters) {
 }
 
 export function getFilterLabel(key: ExploreFilterKey, value: string) {
+  const normalized =
+    key === "genres" ? (LEGACY_GENRE_ALIASES[value] ?? value) : value;
   return (
-    EXPLORE_FILTER_OPTIONS[key].find((o) => o.value === value)?.label ?? value
+    EXPLORE_FILTER_OPTIONS[key].find((o) => o.value === normalized)?.label ??
+    normalized
   );
 }
 
@@ -274,13 +298,15 @@ export function getActiveFilterChips(
   const chips: ActiveFilterChip[] = [];
   (Object.keys(EXPLORE_FILTER_OPTIONS) as ExploreFilterKey[]).forEach((key) => {
     for (const value of filters[key]) {
+      const displayValue =
+        key === "genres" ? (LEGACY_GENRE_ALIASES[value] ?? value) : value;
       chips.push({
         key,
-        value,
-        label: getFilterLabel(key, value),
+        value: displayValue,
+        label: getFilterLabel(key, displayValue),
         group:
           key === "genres"
-            ? (genreGroupTitleForValue(value) ?? groupTitles.genres)
+            ? (genreGroupTitleForValue(displayValue) ?? groupTitles.genres)
             : groupTitles[key],
       });
     }
@@ -315,8 +341,12 @@ export function removeFilterValue(
 export function filtersToSearchParams(filters: ExploreFilters) {
   const qs = new URLSearchParams();
   (Object.keys(EXPLORE_FILTER_OPTIONS) as ExploreFilterKey[]).forEach((key) => {
-    if (filters[key].length > 0) {
-      qs.set(key, filters[key].join(","));
+    const values =
+      key === "genres"
+        ? normalizeGenreFilterValues(filters[key])
+        : filters[key];
+    if (values.length > 0) {
+      qs.set(key, values.join(","));
     }
   });
   return qs;
@@ -328,7 +358,9 @@ export function filtersFromSearchParams(
   const base = emptyExploreFilters();
   if (!params) return base;
   return {
-    genres: params.get("genres")?.split(",").filter(Boolean) ?? [],
+    genres: normalizeGenreFilterValues(
+      params.get("genres")?.split(",").filter(Boolean) ?? [],
+    ),
     purposes: params.get("purposes")?.split(",").filter(Boolean) ?? [],
     times: params.get("times")?.split(",").filter(Boolean) ?? [],
     difficulties: params.get("difficulties")?.split(",").filter(Boolean) ?? [],

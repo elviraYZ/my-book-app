@@ -65,9 +65,7 @@ function LoginForm() {
         <h1 className="text-2xl font-bold tracking-tight text-[#111827]">
           {mode === "signin" ? "登录游研书伴" : "注册账号"}
         </h1>
-        <p className="text-sm text-[#71717A]">
-          登录后同步专题、收藏与阅读画像
-        </p>
+        <p className="text-sm text-[#71717A]">登录后同步专题、收藏与阅读画像</p>
       </div>
 
       <form

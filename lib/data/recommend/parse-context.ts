@@ -5,6 +5,10 @@ import {
   clampThemes,
   extractCoreConditionsFromText,
 } from "@/lib/data/recommend-tags";
+import {
+  mergeNegativeConstraints,
+  stripExcludedFromTopics,
+} from "@/lib/data/recommend/negative-constraints";
 import type {
   ReadingDepth,
   RecommendRequest,
@@ -72,6 +76,7 @@ export function buildSearchQueriesFromDemand(
 /**
  * 规则解析 StructuredDemandContext。
  * topics = 白名单；keywords = 本次关注；searchQueries 内部生成。
+ * 负向约束 → excludedTopics / excludedKeywords / excludedConcepts。
  */
 export function parseDemandContext(
   text: string,
@@ -79,15 +84,27 @@ export function parseDemandContext(
 ): StructuredDemandContext {
   const extracted = extractCoreConditionsFromText(text);
 
-  const topics =
+  const negatives = mergeNegativeConstraints({
+    excludedTopics: extracted.excludedTopics,
+    excludedKeywords: extracted.excludedKeywords,
+    excludedConcepts: extracted.excludedConcepts,
+  });
+
+  let topics =
     input.themes !== undefined
       ? clampThemes(input.themes)
       : extracted.themes;
+  topics = stripExcludedFromTopics(topics, negatives.excludedTopics);
 
+  const banKw = new Set([
+    ...negatives.excludedTopics,
+    ...negatives.excludedKeywords,
+    ...negatives.excludedConcepts,
+  ]);
   const keywords =
     input.keywords !== undefined
-      ? clampKeywords(input.keywords)
-      : clampKeywords(extracted.keywords);
+      ? clampKeywords(input.keywords).filter((k) => !banKw.has(k))
+      : clampKeywords(extracted.keywords.filter((k) => !banKw.has(k)));
 
   const styles =
     input.preferences !== undefined
@@ -113,8 +130,7 @@ export function parseDemandContext(
   const goal = goals[0] ?? "";
 
   const exclusions = inferExclusions(text, styles);
-  let finalKeywords = keywords;
-  // 不整句 seed；无 keywords 时留给 LLM / searchQueries 用 topics
+  const finalKeywords = keywords;
 
   const searchQueries = buildSearchQueriesFromDemand(
     topics,
@@ -138,6 +154,7 @@ export function parseDemandContext(
     difficulty,
     time,
     exclusions,
+    ...negatives,
     searchQueries:
       searchQueries.length > 0
         ? searchQueries

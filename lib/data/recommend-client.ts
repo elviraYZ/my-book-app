@@ -3,6 +3,7 @@
  * 一律请求 /api/recommend，由服务端跑 Context-first 流水线。
  */
 
+import { listDislikedBookIds } from "@/lib/data/book-actions";
 import { mockStore } from "@/lib/data/mock-store";
 import { getProfile } from "@/lib/data/profile";
 import type {
@@ -24,6 +25,23 @@ export function ensureContextTurns(context: RecommendContext): ContextTurn[] {
       source: "initial",
     },
   ];
+}
+
+function stripDislikedFromResult(
+  result: RecommendResponse,
+  dislikedIds: string[],
+): RecommendResponse {
+  if (dislikedIds.length === 0) return result;
+  const ban = new Set(dislikedIds);
+  const books = result.books.filter(
+    (b) => !ban.has(b.book_id) && !(b.book?.id && ban.has(b.book.id)),
+  );
+  if (books.length === result.books.length) return result;
+  return {
+    ...result,
+    books: books.map((b, i) => ({ ...b, rank: i + 1 })),
+    total_count: books.length,
+  };
 }
 
 export async function recommend(
@@ -65,5 +83,24 @@ export async function recommend(
 }
 
 export async function getLastRecommend(): Promise<RecommendResponse | null> {
-  return mockStore.getLastRecommend();
+  const cached = mockStore.getLastRecommend();
+  if (!cached) return null;
+  try {
+    const disliked = await listDislikedBookIds();
+    const next = stripDislikedFromResult(cached, disliked);
+    if (next !== cached && typeof window !== "undefined") {
+      mockStore.saveLastRecommend(next);
+    }
+    return next;
+  } catch {
+    return cached;
+  }
+}
+
+/** 从本地缓存结果中立刻隐藏一本书（不感兴趣后返回列表用） */
+export function hideBookFromLastRecommend(bookId: string): void {
+  const cached = mockStore.getLastRecommend();
+  if (!cached) return;
+  const next = stripDislikedFromResult(cached, [bookId]);
+  if (next !== cached) mockStore.saveLastRecommend(next);
 }

@@ -540,6 +540,21 @@ export const mockStore = {
     return clone(next.find((a) => a.book_id === bookId)!);
   },
 
+  getBookAction(bookId: string): UserBookAction | null {
+    const current = (readStorage<UserBookAction[]>(ACTIONS_KEY) ?? actions).filter(
+      (a) => a.status === "disliked",
+    );
+    const found = current.find((a) => a.book_id === bookId);
+    return found ? clone(found) : null;
+  },
+
+  listDislikedBookIds(): string[] {
+    const current = (readStorage<UserBookAction[]>(ACTIONS_KEY) ?? actions).filter(
+      (a) => a.status === "disliked",
+    );
+    return [...new Set(current.map((a) => a.book_id))];
+  },
+
   saveLastRecommend(result: RecommendResponse) {
     lastRecommend = clone(result);
     writeStorage(LAST_RECOMMEND_KEY, result);

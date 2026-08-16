@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Check,
   ArrowLeft,
@@ -13,6 +14,7 @@ import {
   ListOrdered,
   Loader2,
   MessageCircle,
+  Copy,
   Star,
   Target,
   UserRound,
@@ -24,33 +26,33 @@ import {
 } from "lucide-react";
 
 import { BookmarkButton } from "@/components/bookmark-button";
-import { showComingSoon } from "@/components/coming-soon";
+import { BookCover } from "@/components/book-cover";
 import { SiteHeader } from "@/components/site-header";
 import { bookDetailHref } from "@/lib/book-links";
-import { setBookAction } from "@/lib/data";
+import {
+  getBookSourceUrl,
+  tryOpenExternalUrl,
+} from "@/lib/book-external-links";
+import {
+  getBookAction,
+  hideBookFromLastRecommend,
+  setBookAction,
+} from "@/lib/data";
+import { emitDislikedChanged } from "@/lib/data-events";
 import type { BookDetail, UserBookStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Crumb = { label: string; href?: string };
 
 function Cover({ book }: { book: BookDetail }) {
-  if (book.cover_url) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={book.cover_url}
-        alt={book.title}
-        className="aspect-[2/3] w-full rounded-xl object-cover shadow-md"
-      />
-    );
-  }
   return (
-    <div
-      className="flex aspect-[2/3] w-full items-end justify-center rounded-xl px-3 pb-4 text-center text-sm font-semibold leading-snug text-white shadow-md"
-      style={{ backgroundColor: book.cover_color ?? "#64748b" }}
-    >
-      {book.title}
-    </div>
+    <BookCover
+      title={book.title}
+      coverUrl={book.cover_url}
+      color={book.cover_color}
+      className="w-full rounded-xl text-sm shadow-md"
+      titleChars={12}
+    />
   );
 }
 
@@ -111,43 +113,42 @@ function CollapsibleIntro({ text }: { text: string }) {
   );
 }
 
-/** 左侧「外部获取」：试读 / 来源；无链接时 coming soon */
+/** 左侧「外部获取」：打开来源链接；底部一键复制来源链接（不是 ISBN） */
 function ExternalGetMenu({ book }: { book: BookDetail }) {
   const [open, setOpen] = useState(false);
-  const links = [
-    book.preview_url
-      ? { href: book.preview_url, label: "试读预览" }
-      : null,
-    book.info_url ? { href: book.info_url, label: "来源页面" } : null,
-  ].filter(Boolean) as { href: string; label: string }[];
+  const [copied, setCopied] = useState(false);
+  const [openFailed, setOpenFailed] = useState(false);
+  const sourceUrl = getBookSourceUrl(book);
 
-  if (links.length === 0) {
+  const copySource = async () => {
+    if (!sourceUrl) return;
+    try {
+      await navigator.clipboard.writeText(sourceUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setOpenFailed(true);
+    }
+  };
+
+  const openSource = () => {
+    if (!sourceUrl) return;
+    const ok = tryOpenExternalUrl(sourceUrl);
+    setOpenFailed(!ok);
+    setOpen(true);
+  };
+
+  if (!sourceUrl) {
     return (
       <button
         type="button"
-        onClick={() =>
-          showComingSoon("外部获取入口开发中，后续将支持购买 / 借阅链接")
-        }
-        className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-[#C9D4FF] bg-white text-[13px] font-semibold text-[#4F5DFF] hover:bg-[#F5F7FF]"
+        disabled
+        className="inline-flex h-10 w-full cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] text-[13px] font-semibold text-[#9CA3AF]"
+        title="暂无来源链接"
       >
         <ExternalLink className="size-4" />
-        外部获取
-        <ChevronDown className="size-3.5 opacity-70" />
+        暂无来源链接
       </button>
-    );
-  }
-
-  if (links.length === 1) {
-    return (
-      <a
-        href={links[0].href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-[#C9D4FF] bg-white text-[13px] font-semibold text-[#4F5DFF] hover:bg-[#F5F7FF]"
-      >
-        <ExternalLink className="size-4" />
-        {links[0].label}
-      </a>
     );
   }
 
@@ -155,30 +156,67 @@ function ExternalGetMenu({ book }: { book: BookDetail }) {
     <div className="relative">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!open) openSource();
+          else {
+            setOpen(false);
+            setOpenFailed(false);
+          }
+        }}
         className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-[#C9D4FF] bg-white text-[13px] font-semibold text-[#4F5DFF] hover:bg-[#F5F7FF]"
       >
         <ExternalLink className="size-4" />
         外部获取
         <ChevronDown
-          className={cn("size-3.5 opacity-70 transition-transform", open && "rotate-180")}
+          className={cn(
+            "size-3.5 opacity-70 transition-transform",
+            open && "rotate-180",
+          )}
         />
       </button>
+
       {open ? (
-        <div className="absolute inset-x-0 top-[calc(100%+6px)] z-20 overflow-hidden rounded-xl border border-[#E6EAF2] bg-white shadow-lg">
-          {links.map((link) => (
-            <a
-              key={link.href}
-              href={link.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => setOpen(false)}
-              className="flex items-center gap-2 px-3 py-2.5 text-[13px] font-medium text-[#374151] hover:bg-[#F5F7FF] hover:text-[#4F5DFF]"
-            >
-              <ExternalLink className="size-3.5 shrink-0" />
-              {link.label}
-            </a>
-          ))}
+        <div className="absolute inset-x-0 top-[calc(100%+6px)] z-20 space-y-2 rounded-xl border border-[#E6EAF2] bg-white p-3 shadow-lg">
+          <button
+            type="button"
+            onClick={openSource}
+            className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-[#C9D4FF] bg-[#F5F7FF] text-[12px] font-semibold text-[#4F5DFF] hover:bg-[#EEF2FF]"
+          >
+            <ExternalLink className="size-3.5" />
+            打开来源页面
+          </button>
+
+          {openFailed ? (
+            <p className="text-[11px] font-medium text-amber-700">
+              未能自动打开（可能需 VPN）。请复制下方来源链接。
+            </p>
+          ) : (
+            <p className="text-[11px] text-[#64748B]">
+              打不开时，复制来源链接，开 VPN 后粘贴到地址栏。
+            </p>
+          )}
+
+          <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-2">
+            <p className="mb-1 text-[10px] font-semibold tracking-wide text-[#94A3B8] uppercase">
+              来源链接
+            </p>
+            <p className="break-all font-mono text-[11px] leading-snug text-[#475569]">
+              {sourceUrl}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void copySource()}
+            className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-[#4F5DFF] text-[12px] font-semibold text-white hover:bg-[#4338CA]"
+          >
+            {copied ? (
+              <Check className="size-3.5" />
+            ) : (
+              <Copy className="size-3.5" />
+            )}
+            {copied ? "已复制来源链接" : "一键复制来源链接"}
+          </button>
         </div>
       ) : null}
     </div>
@@ -204,20 +242,51 @@ export function BookDetailClient({
   topicId?: string;
   initialStatus?: UserBookStatus | null;
 }) {
+  const router = useRouter();
   const [status, setStatus] = useState<UserBookStatus | null>(initialStatus);
   const [dislikePending, setDislikePending] = useState(false);
   const [showAllToc, setShowAllToc] = useState(false);
+  const [dislikeError, setDislikeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getBookAction(book.id)
+      .then((action) => {
+        if (!cancelled && action?.status === "disliked") {
+          setStatus("disliked");
+        }
+      })
+      .catch(() => {
+        /* 未登录等忽略 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [book.id]);
 
   const toc = book.toc ?? [];
   const visibleToc = showAllToc ? toc : toc.slice(0, 5);
   const introText = (book.content_intro ?? book.description ?? "").trim();
 
   const onDislike = async () => {
-    if (dislikePending) return;
+    if (dislikePending || status === "disliked") return;
+    const ok = window.confirm(
+      "标记后，这本书会从当前推荐里移除，并记入你的偏好；之后推荐会尽量避开它。个人偏好与相似降权还在完善中。确定标记为不感兴趣？",
+    );
+    if (!ok) return;
+
     setDislikePending(true);
+    setDislikeError(null);
     try {
       await setBookAction(book.id, "disliked", topicId);
       setStatus("disliked");
+      hideBookFromLastRecommend(book.id);
+      emitDislikedChanged(book.id);
+      router.push(backHref);
+    } catch (e) {
+      setDislikeError(
+        e instanceof Error ? e.message : "记录失败，请登录后重试",
+      );
     } finally {
       setDislikePending(false);
     }
@@ -296,7 +365,7 @@ export function BookDetailClient({
               />
               <button
                 type="button"
-                disabled={dislikePending}
+                disabled={dislikePending || status === "disliked"}
                 onClick={() => void onDislike()}
                 className={cn(
                   "inline-flex h-10 items-center justify-center gap-2 rounded-xl border text-[13px] font-semibold transition-colors",
@@ -310,8 +379,13 @@ export function BookDetailClient({
                 ) : (
                   <CircleSlash className="size-4" />
                 )}
-                不感兴趣
+                {status === "disliked" ? "已标记不感兴趣" : "不感兴趣"}
               </button>
+              {dislikeError ? (
+                <p className="text-center text-[11px] font-medium text-[#DC2626]">
+                  {dislikeError}
+                </p>
+              ) : null}
               <ExternalGetMenu book={book} />
             </div>
 
@@ -439,27 +513,35 @@ export function BookDetailClient({
                 icon={<ListOrdered className="size-4" />}
                 title="目录概览"
               >
-                <ol className="space-y-1.5 text-[13px] text-[#4B5568]">
-                  {visibleToc.map((chapter, i) => (
-                    <li key={chapter} className="flex gap-2">
-                      <span className="w-4 shrink-0 text-[#9AA3B5]">
-                        {i + 1}.
-                      </span>
-                      <span>{chapter}</span>
-                    </li>
-                  ))}
-                </ol>
-                {toc.length > 5 ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowAllToc((v) => !v)}
-                    className="mt-3 text-[12px] font-semibold text-[#4F5DFF] hover:underline"
-                  >
-                    {showAllToc
-                      ? "收起目录"
-                      : `查看完整目录（共 ${toc.length} 章）`}
-                  </button>
-                ) : null}
+                {toc.length === 0 ? (
+                  <p className="text-[13px] leading-relaxed text-[#9AA3B5]">
+                    暂无目录信息
+                  </p>
+                ) : (
+                  <>
+                    <ol className="space-y-1.5 text-[13px] text-[#4B5568]">
+                      {visibleToc.map((chapter, i) => (
+                        <li key={`${i}-${chapter}`} className="flex gap-2">
+                          <span className="w-4 shrink-0 text-[#9AA3B5]">
+                            {i + 1}.
+                          </span>
+                          <span>{chapter}</span>
+                        </li>
+                      ))}
+                    </ol>
+                    {toc.length > 5 ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowAllToc((v) => !v)}
+                        className="mt-3 text-[12px] font-semibold text-[#4F5DFF] hover:underline"
+                      >
+                        {showAllToc
+                          ? "收起目录"
+                          : `查看完整目录（共 ${toc.length} 章）`}
+                      </button>
+                    ) : null}
+                  </>
+                )}
               </InfoCard>
             </div>
 
@@ -487,14 +569,13 @@ export function BookDetailClient({
                       })}
                       className="flex gap-2.5 rounded-xl border border-[#E6EAF2] bg-[#FAFBFD] p-2.5 transition-colors hover:border-[#C9D4FF]"
                     >
-                      <div
-                        className="flex aspect-[2/3] w-12 shrink-0 items-end justify-center rounded-md px-1 pb-1.5 text-center text-[8px] font-semibold text-white"
-                        style={{
-                          backgroundColor: item.cover_color ?? "#64748b",
-                        }}
-                      >
-                        {item.title.slice(0, 6)}
-                      </div>
+                      <BookCover
+                        title={item.title}
+                        coverUrl={item.cover_url}
+                        color={item.cover_color}
+                        className="w-12 rounded-md text-[8px]"
+                        titleChars={6}
+                      />
                       <div className="min-w-0 flex-1">
                         <p className="line-clamp-2 text-[13px] font-semibold text-[#111827]">
                           {item.title}

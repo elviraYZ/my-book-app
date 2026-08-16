@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getAiProvider } from "@/lib/ai/config";
 import { runWithAiRequestState } from "@/lib/ai/request-state";
+import { listDislikedBookIds } from "@/lib/data/book-actions";
 import { listCatalogBooks } from "@/lib/data/catalog";
 import { isMockMode } from "@/lib/data/config";
 import { ingestBooks } from "@/lib/data/ingest";
@@ -436,6 +437,9 @@ async function runRecommendPipelineInner(
     goals: demand.goals ?? (demand.goal ? [demand.goal] : []),
     themes: demand.topics,
     keywords: demand.keywords,
+    excludedTopics: demand.excludedTopics,
+    excludedKeywords: demand.excludedKeywords,
+    excludedConcepts: demand.excludedConcepts,
     preferences: demand.styles,
     depth: demand.difficulty ?? undefined,
     session_bucket: demand.time,
@@ -475,6 +479,20 @@ async function runRecommendPipelineInner(
   };
   if (timingOn) recordHybridTimings(hybrid);
 
+  const dislikedIds = await listDislikedBookIds(options.supabase).catch(
+    () => [] as string[],
+  );
+  const dislikedSet = new Set(dislikedIds);
+  const withoutDisliked = (books: Book[]) =>
+    dislikedSet.size === 0
+      ? books
+      : books.filter((b) => !dislikedSet.has(b.id));
+
+  hybrid = {
+    ...hybrid,
+    books: withoutDisliked(hybrid.books),
+  };
+
   let cachedQueryEmbedding = hybrid.queryEmbedding;
   let rejectSamples: RejectSample[] = [];
   let scored = timeSync("scoreMs", () => {
@@ -513,6 +531,10 @@ async function runRecommendPipelineInner(
       queryEmbedding: cachedQueryEmbedding,
     });
     if (timingOn) recordHybridTimings(hybrid);
+    hybrid = {
+      ...hybrid,
+      books: withoutDisliked(hybrid.books),
+    };
     cachedQueryEmbedding = hybrid.queryEmbedding ?? cachedQueryEmbedding;
     const pool = scorePool(
       hybrid.books,
@@ -571,6 +593,10 @@ async function runRecommendPipelineInner(
         limit: recallK,
         queryEmbedding: cachedQueryEmbedding,
       });
+      hybrid = {
+        ...hybrid,
+        books: withoutDisliked(hybrid.books),
+      };
       const pool = scorePool(
         hybrid.books,
         demand,

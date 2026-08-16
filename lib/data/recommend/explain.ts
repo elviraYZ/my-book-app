@@ -3,16 +3,18 @@ import type {
   DimensionScores,
   StructuredDemandContext,
 } from "@/lib/types";
+import { hardRejectByExcludedPrimary } from "@/lib/data/recommend/negative-constraints";
 
-/** Hard filter：仅明确 exclusions */
+/** Hard filter：legacy exclusions + excludedTopics∩primary_topics */
 export function passesExclusions(
   book: Book,
   demand: StructuredDemandContext,
 ): boolean {
+  if (hardRejectByExcludedPrimary(book, demand)) return false;
+
   for (const ex of demand.exclusions) {
     if (ex === "英文") {
       const blob = `${book.title} ${book.description ?? ""}`;
-      // 粗略：标题几乎无中日韩且描述英文味重
       const hasCjk = /[\u4e00-\u9fff]/.test(book.title);
       if (!hasCjk && /[a-zA-Z]{4,}/.test(blob)) return false;
     }
@@ -22,7 +24,7 @@ export function passesExclusions(
         return false;
       }
     }
-    if (ex === "理论") {
+    if (ex === "理论" || ex === "重理论") {
       if (
         book.content_style.length === 1 &&
         book.content_style[0] === "theory"

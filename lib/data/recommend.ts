@@ -31,6 +31,7 @@ export {
   recommend,
   getLastRecommend,
   ensureContextTurns,
+  hideBookFromLastRecommend,
 } from "@/lib/data/recommend-client";
 
 /**

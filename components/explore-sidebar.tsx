@@ -15,6 +15,8 @@ import {
 import type { ExploreFilters } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+const GENRE_PREVIEW_COUNT = 3;
+
 const sections: {
   key: Exclude<ExploreFilterKey, "genres">;
   title: string;
@@ -35,19 +37,27 @@ function GenreCheckbox({
   label,
   onToggle,
   indeterminate,
+  compact,
 }: {
   checked: boolean;
   label: string;
   onToggle: () => void;
   indeterminate?: boolean;
+  /** 最内层题材选项：字更小，和组名拉开对比 */
+  compact?: boolean;
 }) {
   return (
     <label
       className={cn(
-        "flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm transition-colors",
+        "flex cursor-pointer items-center rounded-lg px-2 transition-colors",
+        compact
+          ? "gap-2 py-1 text-[12px] leading-snug"
+          : "gap-2.5 py-1.5 text-sm",
         checked || indeterminate
           ? "bg-primary/8 text-primary"
-          : "text-slate-700 hover:bg-slate-50",
+          : compact
+            ? "text-slate-600 hover:bg-slate-50"
+            : "text-slate-700 hover:bg-slate-50",
       )}
     >
       <input
@@ -58,7 +68,10 @@ function GenreCheckbox({
         }}
         onChange={onToggle}
         onClick={(e) => e.stopPropagation()}
-        className="size-3.5 rounded border-slate-300 text-primary accent-primary"
+        className={cn(
+          "rounded border-slate-300 text-primary accent-primary",
+          compact ? "size-3" : "size-3.5",
+        )}
       />
       <span>{label}</span>
     </label>
@@ -74,10 +87,19 @@ function setGroupGenres(
   const withoutGroup = filters.genres.filter((g) => !groupSet.has(g));
   return {
     ...filters,
-    genres: selectAll
-      ? [...withoutGroup, ...groupValues]
-      : withoutGroup,
+    genres: selectAll ? [...withoutGroup, ...groupValues] : withoutGroup,
   };
+}
+
+/** 已选项落在预览区外时，默认展开该组选项 */
+function initialExpandedGroups(genres: string[]): Record<string, boolean> {
+  const map: Record<string, boolean> = {};
+  for (const group of GENRE_FILTER_GROUPS) {
+    map[group.title] = group.options
+      .slice(GENRE_PREVIEW_COUNT)
+      .some((o) => genres.includes(o.value));
+  }
+  return map;
 }
 
 export function ExploreSidebar({
@@ -86,8 +108,18 @@ export function ExploreSidebar({
   className,
 }: ExploreSidebarProps) {
   const activeCount = countActiveFilters(value);
-  // 起始全部收起；仅用户点击才展开
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  /** 整组折叠：默认全部展开，点标题可收起 */
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
+    const map: Record<string, boolean> = {};
+    for (const group of GENRE_FILTER_GROUPS) {
+      map[group.title] = true;
+    }
+    return map;
+  });
+  /** 组内是否展开超过 3 项 */
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
+    () => initialExpandedGroups(value.genres),
+  );
 
   const selectedCountByGroup = useMemo(() => {
     const map: Record<string, number> = {};
@@ -98,10 +130,6 @@ export function ExploreSidebar({
     }
     return map;
   }, [value.genres]);
-
-  const toggleGroupOpen = (title: string) => {
-    setOpenGroups((prev) => ({ ...prev, [title]: !prev[title] }));
-  };
 
   return (
     <aside
@@ -131,26 +159,37 @@ export function ExploreSidebar({
       </div>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 sm:p-5">
-        <div className="space-y-2">
+        <div className="space-y-3">
           <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
             题材
           </p>
-          {GENRE_FILTER_GROUPS.map((group) => {
-            const open = openGroups[group.title] ?? false;
+          {GENRE_FILTER_GROUPS.map((group, index) => {
+            const open = openGroups[group.title] ?? true;
+            const expanded = expandedGroups[group.title] ?? false;
             const selected = selectedCountByGroup[group.title] ?? 0;
             const total = group.options.length;
             const allSelected = selected === total && total > 0;
             const someSelected = selected > 0 && !allSelected;
             const groupValues = group.options.map((o) => o.value);
+            const canExpand = total > GENRE_PREVIEW_COUNT;
+            const visibleOptions =
+              expanded || !canExpand
+                ? group.options
+                : group.options.slice(0, GENRE_PREVIEW_COUNT);
+            const hiddenCount = total - GENRE_PREVIEW_COUNT;
+            const isLast = index === GENRE_FILTER_GROUPS.length - 1;
 
             return (
               <div
                 key={group.title}
-                className="overflow-hidden rounded-xl border border-slate-100"
+                className={cn(
+                  "space-y-0.5",
+                  !isLast && "border-b border-slate-100 pb-3",
+                )}
               >
-                <div className="flex items-center gap-1 bg-slate-50/80 px-1.5 py-1.5 hover:bg-slate-50">
+                <div className="flex items-center gap-1">
                   <label
-                    className="flex shrink-0 cursor-pointer items-center px-1"
+                    className="flex shrink-0 cursor-pointer items-center px-1 py-1.5"
                     title={allSelected ? "取消全选本组" : "全选本组"}
                   >
                     <input
@@ -171,16 +210,21 @@ export function ExploreSidebar({
                   </label>
                   <button
                     type="button"
-                    onClick={() => toggleGroupOpen(group.title)}
+                    onClick={() =>
+                      setOpenGroups((prev) => ({
+                        ...prev,
+                        [group.title]: !open,
+                      }))
+                    }
                     aria-expanded={open}
-                    className="flex min-w-0 flex-1 items-center justify-between gap-2 px-1 py-0.5 text-left"
+                    className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg px-1 py-1.5 text-left hover:bg-slate-50"
                   >
                     <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="text-[13px] font-medium text-slate-700">
+                      <span className="text-[13px] font-medium text-slate-500">
                         {group.title}
                       </span>
                       {selected > 0 ? (
-                        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                        <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
                           {selected}/{total}
                         </span>
                       ) : null}
@@ -193,25 +237,50 @@ export function ExploreSidebar({
                     />
                   </button>
                 </div>
+
                 {open ? (
-                  <ul className="max-h-44 space-y-0.5 overflow-y-auto overscroll-contain p-1.5">
-                    {group.options.map((opt) => {
-                      const checked = value.genres.includes(opt.value);
-                      return (
-                        <li key={opt.value}>
-                          <GenreCheckbox
-                            checked={checked}
-                            label={opt.label}
-                            onToggle={() =>
-                              onChange(
-                                toggleFilterValue(value, "genres", opt.value),
-                              )
-                            }
-                          />
-                        </li>
-                      );
-                    })}
-                  </ul>
+                  <>
+                    <ul className="space-y-0.5 pl-0.5">
+                      {visibleOptions.map((opt) => {
+                        const checked = value.genres.includes(opt.value);
+                        return (
+                          <li key={opt.value}>
+                            <GenreCheckbox
+                              compact
+                              checked={checked}
+                              label={opt.label}
+                              onToggle={() =>
+                                onChange(
+                                  toggleFilterValue(value, "genres", opt.value),
+                                )
+                              }
+                            />
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    {canExpand ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedGroups((prev) => ({
+                            ...prev,
+                            [group.title]: !expanded,
+                          }))
+                        }
+                        aria-expanded={expanded}
+                        className="flex w-full items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+                      >
+                        {expanded ? "收起" : `展开另外 ${hiddenCount} 项`}
+                        <ChevronDown
+                          className={cn(
+                            "size-3.5 transition-transform",
+                            expanded && "rotate-180",
+                          )}
+                        />
+                      </button>
+                    ) : null}
+                  </>
                 ) : null}
               </div>
             );
@@ -250,7 +319,7 @@ export function ExploreSidebar({
             小贴士
           </p>
           <p className="text-xs leading-relaxed text-sky-900/80">
-            分组左侧可全选；点标题展开或收起。侧栏过长可上下滑动。
+            左侧可全选；点组名折叠；选项过多时点「展开另外」。
           </p>
         </div>
       </div>

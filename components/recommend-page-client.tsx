@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 import { BookmarkButton } from "@/components/bookmark-button";
+import { BookCover } from "@/components/book-cover";
 import {
   CreateTopicModal,
   type CreateTopicPrefill,
@@ -43,16 +44,10 @@ import {
   syncTopicRecommendations,
   updateTopic,
 } from "@/lib/data";
-import type {
-  ReadingDepth,
-  RecommendResponse,
-  TopicBook,
-} from "@/lib/types";
+import { DISLIKED_CHANGED } from "@/lib/data-events";
+import type { ReadingDepth, RecommendResponse, TopicBook } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import {
-  COVERAGE_TIP,
-  REFINEMENT_TIP,
-} from "@/lib/data/recommend/weights";
+import { COVERAGE_TIP, REFINEMENT_TIP } from "@/lib/data/recommend/weights";
 
 type ViewMode = "grid" | "list";
 
@@ -105,28 +100,6 @@ function bookSummaryText(item: TopicBook): string {
   return "";
 }
 
-function Cover({
-  title,
-  color,
-  className,
-}: {
-  title: string;
-  color?: string;
-  className?: string;
-}) {
-  return (
-    <div
-      className={cn(
-        "flex aspect-[2/3] shrink-0 items-end justify-center rounded-lg px-1.5 pb-2 text-center text-[10px] font-semibold leading-tight text-white shadow-sm",
-        className,
-      )}
-      style={{ backgroundColor: color ?? "#64748b" }}
-    >
-      {title.slice(0, 8)}
-    </div>
-  );
-}
-
 function bookHref(item: TopicBook) {
   const id = item.book?.id ?? item.book_id;
   return bookDetailHref(id, { from: "recommend" });
@@ -136,11 +109,17 @@ function FeaturedCard({
   item,
   index,
   blurbMode = "auto",
+  topicId,
+  saveAsTopicPrefill,
+  onTopicCreated,
 }: {
   item: TopicBook;
   index: number;
   /** auto：grid 前三推荐理由，其余简介；reason / summary 可强制 */
   blurbMode?: "auto" | "reason" | "summary";
+  topicId?: string | null;
+  saveAsTopicPrefill?: CreateTopicPrefill | null;
+  onTopicCreated?: (topicId: string) => void;
 }) {
   const book = item.book;
   const title = book?.title ?? "未知书名";
@@ -150,8 +129,7 @@ function FeaturedCard({
       ? item.matched_tags
       : (book?.tags ?? []).slice(0, 3);
   const useReason =
-    blurbMode === "reason" ||
-    (blurbMode === "auto" && index < EXPLAIN_TOP_N);
+    blurbMode === "reason" || (blurbMode === "auto" && index < EXPLAIN_TOP_N);
   const blurb = useReason
     ? (item.match_reason?.trim() ?? "")
     : bookSummaryText(item);
@@ -167,8 +145,9 @@ function FeaturedCard({
       </div>
 
       <Link href={href}>
-        <Cover
+        <BookCover
           title={title}
+          coverUrl={book?.cover_url}
           color={book?.cover_color}
           className="mx-auto w-[7.5rem] text-[11px] sm:w-32"
         />
@@ -219,6 +198,9 @@ function FeaturedCard({
         <BookmarkButton
           bookId={book?.id ?? item.book_id}
           bookTitle={title}
+          topicId={topicId}
+          saveAsTopicPrefill={saveAsTopicPrefill}
+          onTopicCreated={onTopicCreated}
           className="inline-flex size-9 items-center justify-center rounded-xl border border-[#E6EAF2]"
         />
         <Link
@@ -232,7 +214,17 @@ function FeaturedCard({
   );
 }
 
-function AltRow({ item }: { item: TopicBook }) {
+function AltRow({
+  item,
+  topicId,
+  saveAsTopicPrefill,
+  onTopicCreated,
+}: {
+  item: TopicBook;
+  topicId?: string | null;
+  saveAsTopicPrefill?: CreateTopicPrefill | null;
+  onTopicCreated?: (topicId: string) => void;
+}) {
   const book = item.book;
   const title = book?.title ?? "未知书名";
   const href = bookHref(item);
@@ -242,8 +234,9 @@ function AltRow({ item }: { item: TopicBook }) {
   return (
     <div className="flex gap-2.5 rounded-xl border border-[#E6EAF2] bg-[#FAFBFD] p-2.5 transition-colors hover:border-[#C9D4FF]">
       <Link href={href} className="flex min-w-0 flex-1 gap-2.5">
-        <Cover
+        <BookCover
           title={title}
+          coverUrl={book?.cover_url}
           color={book?.cover_color}
           className="w-11 text-[8px]"
         />
@@ -273,6 +266,9 @@ function AltRow({ item }: { item: TopicBook }) {
         <BookmarkButton
           bookId={bookId}
           bookTitle={title}
+          topicId={topicId}
+          saveAsTopicPrefill={saveAsTopicPrefill}
+          onTopicCreated={onTopicCreated}
           className="mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-[#E6EAF2] bg-white"
           iconClassName="size-3.5"
         />
@@ -281,7 +277,19 @@ function AltRow({ item }: { item: TopicBook }) {
   );
 }
 
-function ListCard({ item, index }: { item: TopicBook; index: number }) {
+function ListCard({
+  item,
+  index,
+  topicId,
+  saveAsTopicPrefill,
+  onTopicCreated,
+}: {
+  item: TopicBook;
+  index: number;
+  topicId?: string | null;
+  saveAsTopicPrefill?: CreateTopicPrefill | null;
+  onTopicCreated?: (topicId: string) => void;
+}) {
   const book = item.book;
   const title = book?.title ?? "未知书名";
   const href = bookHref(item);
@@ -292,8 +300,9 @@ function ListCard({ item, index }: { item: TopicBook; index: number }) {
   return (
     <article className="flex gap-4 rounded-2xl border border-[#E6EAF2] bg-white p-4 transition-colors hover:border-[#C9D4FF]">
       <Link href={href} className="shrink-0">
-        <Cover
+        <BookCover
           title={title}
+          coverUrl={book?.cover_url}
           color={book?.cover_color}
           className="w-16 text-[9px] sm:w-[4.5rem]"
         />
@@ -315,6 +324,9 @@ function ListCard({ item, index }: { item: TopicBook; index: number }) {
               <BookmarkButton
                 bookId={bookId}
                 bookTitle={title}
+                topicId={topicId}
+                saveAsTopicPrefill={saveAsTopicPrefill}
+                onTopicCreated={onTopicCreated}
                 className="inline-flex size-8 items-center justify-center rounded-lg border border-[#E6EAF2]"
                 iconClassName="size-3.5"
               />
@@ -397,9 +409,7 @@ export function RecommendPageClient() {
     setDemandText(demandTextFromResult(data));
     setSelectedThemes(clampThemes(data.context.themes ?? []));
     setSelectedKeywords(
-      clampKeywords(
-        data.demand?.keywords ?? data.context.keywords ?? [],
-      ),
+      clampKeywords(data.demand?.keywords ?? data.context.keywords ?? []),
     );
     setSelectedPreferences(clampPreferences(data.context.preferences ?? []));
     setSelectedGoals(goalsFromRecommend(data));
@@ -427,9 +437,45 @@ export function RecommendPageClient() {
     })();
   }, [searchParams]);
 
+  useEffect(() => {
+    const onDisliked = (event: Event) => {
+      const bookId = (event as CustomEvent<{ bookId: string }>).detail?.bookId;
+      if (!bookId) return;
+      setResult((prev) => {
+        if (!prev) return prev;
+        const books = prev.books.filter(
+          (b) => b.book_id !== bookId && b.book?.id !== bookId,
+        );
+        if (books.length === prev.books.length) return prev;
+        return {
+          ...prev,
+          books: books.map((b, i) => ({ ...b, rank: i + 1 })),
+          total_count: books.length,
+        };
+      });
+    };
+    window.addEventListener(DISLIKED_CHANGED, onDisliked);
+    return () => window.removeEventListener(DISLIKED_CHANGED, onDisliked);
+  }, []);
+
   const featured = useMemo(() => result?.books.slice(0, 3) ?? [], [result]);
   const alternatives = useMemo(() => result?.books.slice(3) ?? [], [result]);
   const totalCount = result?.total_count ?? result?.books.length ?? 0;
+
+  const bookmarkTopicId =
+    savedTopicId ?? result?.context.topic_id ?? null;
+
+  const bindCreatedTopic = (id: string) => {
+    setSavedTopicId(id);
+    setResult((prev) =>
+      prev
+        ? {
+            ...prev,
+            context: { ...prev.context, topic_id: id },
+          }
+        : prev,
+    );
+  };
 
   const tagsDirty = useMemo(() => {
     if (!result) return false;
@@ -479,9 +525,7 @@ export function RecommendPageClient() {
     if (!result) return;
     setSelectedThemes(clampThemes(result.context.themes ?? []));
     setSelectedKeywords(
-      clampKeywords(
-        result.demand?.keywords ?? result.context.keywords ?? [],
-      ),
+      clampKeywords(result.demand?.keywords ?? result.context.keywords ?? []),
     );
     setSelectedPreferences(clampPreferences(result.context.preferences ?? []));
     setSelectedGoals(goalsFromRecommend(result));
@@ -608,8 +652,7 @@ export function RecommendPageClient() {
 
     setRerunning(true);
     try {
-      const topicId =
-        savedTopicId ?? result.context.topic_id ?? undefined;
+      const topicId = savedTopicId ?? result.context.topic_id ?? undefined;
       const data = await recommend(
         {
           prompt: text || selectedThemes.join("、"),
@@ -687,17 +730,7 @@ export function RecommendPageClient() {
         open={saveTopicOpen}
         onClose={() => setSaveTopicOpen(false)}
         prefill={saveTopicPrefill}
-        onSaved={(id) => {
-          setSavedTopicId(id);
-          setResult((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  context: { ...prev.context, topic_id: id },
-                }
-              : prev,
-          );
-        }}
+        onSaved={bindCreatedTopic}
       />
       <div className="mx-auto w-full max-w-6xl space-y-5 px-4 py-6 sm:px-6 sm:py-8">
         <div>
@@ -757,9 +790,7 @@ export function RecommendPageClient() {
                 <p className="text-sm font-medium text-[#1F2937]">
                   正在加载推荐结果…
                 </p>
-                <p className="text-[13px] text-[#8B95A8]">
-                  马上就好，请稍候
-                </p>
+                <p className="text-[13px] text-[#8B95A8]">马上就好，请稍候</p>
               </div>
               <div className="h-1.5 w-full max-w-[200px] overflow-hidden rounded-full bg-[#EEF2FF]">
                 <div className="h-full w-1/3 rounded-full bg-[#4F5DFF] motion-safe:animate-[recommend-progress_2.8s_ease-in-out_infinite]" />
@@ -867,7 +898,7 @@ export function RecommendPageClient() {
                 {canApply
                   ? "有未应用改动；可在对应区块「撤销」，或点「重新推荐」刷新"
                   : "可编辑需求 / 调整条件；全新需求请「开启新搜索」"}
-            </p>
+              </p>
               <div className="inline-flex rounded-lg border border-[#E6EAF2] bg-white p-0.5">
                 <button
                   type="button"
@@ -911,7 +942,14 @@ export function RecommendPageClient() {
             ) : viewMode === "list" ? (
               <div className="space-y-3">
                 {result.books.slice(0, listVisible).map((item, index) => (
-                  <ListCard key={item.id} item={item} index={index} />
+                  <ListCard
+                    key={item.id}
+                    item={item}
+                    index={index}
+                    topicId={bookmarkTopicId}
+                    saveAsTopicPrefill={saveTopicPrefill}
+                    onTopicCreated={bindCreatedTopic}
+                  />
                 ))}
                 <div className="flex flex-col items-center gap-2 py-4">
                   <p className="text-[12px] text-[#8B95A8]">
@@ -953,7 +991,14 @@ export function RecommendPageClient() {
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   {result.books.map((item, index) => (
-                    <FeaturedCard key={item.id} item={item} index={index} />
+                    <FeaturedCard
+                      key={item.id}
+                      item={item}
+                      index={index}
+                      topicId={bookmarkTopicId}
+                      saveAsTopicPrefill={saveTopicPrefill}
+                      onTopicCreated={bindCreatedTopic}
+                    />
                   ))}
                 </div>
               </div>
@@ -961,7 +1006,14 @@ export function RecommendPageClient() {
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   {featured.map((item, index) => (
-                    <FeaturedCard key={item.id} item={item} index={index} />
+                    <FeaturedCard
+                      key={item.id}
+                      item={item}
+                      index={index}
+                      topicId={bookmarkTopicId}
+                      saveAsTopicPrefill={saveTopicPrefill}
+                      onTopicCreated={bindCreatedTopic}
+                    />
                   ))}
                 </div>
 
@@ -971,7 +1023,13 @@ export function RecommendPageClient() {
                   </h2>
                   <div className="mt-3 flex flex-1 flex-col gap-2.5">
                     {alternatives.slice(0, 4).map((item) => (
-                      <AltRow key={item.id} item={item} />
+                      <AltRow
+                        key={item.id}
+                        item={item}
+                        topicId={bookmarkTopicId}
+                        saveAsTopicPrefill={saveTopicPrefill}
+                        onTopicCreated={bindCreatedTopic}
+                      />
                     ))}
                     {alternatives.length === 0 ? (
                       <p className="py-8 text-center text-[12px] text-[#8B95A8]">
@@ -995,7 +1053,6 @@ export function RecommendPageClient() {
                 </aside>
               </div>
             )}
-
           </>
         )}
       </div>

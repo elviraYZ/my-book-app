@@ -13,6 +13,7 @@ import {
   classifyTopicHit,
   tagsMatchExact,
 } from "@/lib/data/recommend/taxonomy-expand";
+import { softExclusionSortPenalty } from "@/lib/data/recommend/negative-constraints";
 import type {
   Book,
   ContentStyle,
@@ -638,7 +639,7 @@ export function scoreCandidate(input: ScoreInput): DimensionScores {
     (demand.inferredTopics?.length ?? 0) > 0 ||
     (!hasExplicitTopic && (demand.topics?.length ?? 0) > 0);
 
-  return combineScores({
+  const base = combineScores({
     canonicalTopicScore,
     keywordScore,
     semanticScore,
@@ -661,6 +662,17 @@ export function scoreCandidate(input: ScoreInput): DimensionScores {
     difficultyScore: scoreDifficulty(book, demand),
     timeScore: scoreTime(book, demand),
   });
+
+  // 负向：只降权排序，不改 Match% / contextMatchScore
+  const exclusionSoftPenalty = softExclusionSortPenalty(book, demand);
+  if (exclusionSoftPenalty <= 0) return base;
+
+  return {
+    ...base,
+    exclusionSoftPenalty,
+    sortScore: (base.sortScore ?? base.contextMatchScore ?? base.matchScore) -
+      exclusionSoftPenalty,
+  };
 }
 
 export function resolveProfileTags(

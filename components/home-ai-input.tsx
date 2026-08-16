@@ -28,9 +28,7 @@ export function HomeAiInput() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [spotlight, setSpotlight] = useState(false);
-  const placeholder = useRotatingPlaceholder(
-    "例如：想系统学习游戏设计方法论",
-  );
+  const placeholder = useRotatingPlaceholder("例如：想系统学习游戏设计方法论");
   const { percent, label, overlayOpen, finish, dismiss } =
     useEstimatedRecommendProgress(loading);
 
@@ -76,10 +74,7 @@ export function HomeAiInput() {
     setLoading(true);
     setError(null);
     try {
-      await recommend(
-        { prompt: prompt.trim() },
-        { signal: controller.signal },
-      );
+      await recommend({ prompt: prompt.trim() }, { signal: controller.signal });
       if (controller.signal.aborted) return;
       await finish();
       if (controller.signal.aborted) return;

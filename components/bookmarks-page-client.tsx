@@ -5,28 +5,12 @@ import Link from "next/link";
 import { Bookmark, BookOpen } from "lucide-react";
 
 import { BookmarkButton } from "@/components/bookmark-button";
+import { BookCover } from "@/components/book-cover";
 import { NewSearchButton } from "@/components/new-search-provider";
 import { SiteHeader } from "@/components/site-header";
 import { bookDetailHref } from "@/lib/book-links";
 import { listBookmarks, listTopics } from "@/lib/data";
 import type { Bookmark as BookmarkRecord, Topic } from "@/lib/types";
-
-function Cover({
-  title,
-  color,
-}: {
-  title: string;
-  color?: string;
-}) {
-  return (
-    <div
-      className="flex aspect-[2/3] w-14 shrink-0 items-end justify-center rounded-lg px-1 pb-1.5 text-center text-[8px] font-semibold leading-tight text-white shadow-sm sm:w-16"
-      style={{ backgroundColor: color ?? "#64748b" }}
-    >
-      {title.slice(0, 6)}
-    </div>
-  );
-}
 
 export function BookmarksPageClient({
   initialBookmarks,
@@ -81,7 +65,13 @@ export function BookmarksPageClient({
                   className="flex gap-3 rounded-2xl border border-[#E6EAF2] bg-white p-3 shadow-[0_1px_2px_rgba(31,41,55,0.04)] sm:gap-4 sm:p-4"
                 >
                   <Link href={href} className="shrink-0">
-                    <Cover title={title} color={book?.cover_color} />
+                    <BookCover
+                      title={title}
+                      coverUrl={book?.cover_url}
+                      color={book?.cover_color}
+                      className="w-14 sm:w-16"
+                      titleChars={6}
+                    />
                   </Link>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">

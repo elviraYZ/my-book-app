@@ -116,8 +116,8 @@ export function resolveContextMatchWeights(
 /** Profile 对排序的微调幅度（不进入 UI 匹配度） */
 export const PROFILE_SORT_BOOST = {
   /** profile soft 相对 0.5 的偏移 × 系数，封顶 ±maxDelta */
-  scale: 8,
-  maxDelta: 4,
+  scale: 4,
+  maxDelta: 2,
 } as const;
 
 /**

@@ -67,10 +67,8 @@ function NewSearchModal({
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const placeholder = useRotatingPlaceholder(
-    "例如：想系统学习游戏设计方法论",
-  );
-  const { label, overlayOpen, finish, dismiss } =
+  const placeholder = useRotatingPlaceholder("例如：想系统学习游戏设计方法论");
+  const { percent, label, overlayOpen, finish, dismiss } =
     useEstimatedRecommendProgress(loading);
 
   useEffect(() => {
@@ -114,10 +112,7 @@ function NewSearchModal({
     setLoading(true);
     setError(null);
     try {
-      await recommend(
-        { prompt: prompt.trim() },
-        { signal: controller.signal },
-      );
+      await recommend({ prompt: prompt.trim() }, { signal: controller.signal });
       if (controller.signal.aborted) return;
       await finish();
       if (controller.signal.aborted) return;
@@ -141,6 +136,7 @@ function NewSearchModal({
     <>
       <RecommendLoadingOverlay
         open={overlayOpen}
+        percent={percent}
         label={label}
         onCancel={cancelRecommend}
         hint="通常几秒到十几秒。可随时取消。"

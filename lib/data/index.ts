@@ -43,7 +43,7 @@ export type {
   GenreFilterOption,
 } from "@/lib/data/explore";
 
-export { setBookAction } from "@/lib/data/book-actions";
+export { setBookAction, getBookAction, listDislikedBookIds } from "@/lib/data/book-actions";
 
 export {
   listBookmarks,
@@ -58,6 +58,7 @@ export {
   recommend,
   getLastRecommend,
   ensureContextTurns,
+  hideBookFromLastRecommend,
 } from "@/lib/data/recommend-client";
 
 export {

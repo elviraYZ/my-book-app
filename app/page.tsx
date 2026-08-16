@@ -32,7 +32,7 @@ export default async function HomePage() {
                   今天想看什么书？
                 </h1>
                 <p className="max-w-xl text-sm leading-relaxed text-slate-600 sm:text-base">
-                  从一个想法开始，帮你找到合适的书，也把思路留下来。
+                  输入想法，帮你找到合适的书，也把思路留下来。
                 </p>
               </div>
               <Suspense

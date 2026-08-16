@@ -6,6 +6,11 @@
 import {
   CONTEXT_SPECIFICITY,
 } from "@/lib/data/recommend/weights";
+import {
+  maskNegativeSpans,
+  mergeNegativeConstraints,
+  stripExcludedFromTopics,
+} from "@/lib/data/recommend/negative-constraints";
 import { buildSearchQueriesFromDemand } from "@/lib/data/recommend/parse-context";
 import {
   clampGoals,
@@ -59,7 +64,7 @@ export function isBroadExplicitQuery(
 
   // 无细分子句，或整句很短
   const hasDetailClause =
-    /如何|怎样|通过|重点|尤其|希望|不要|案例|理论|地标|路径|机制/.test(t);
+    /如何|怎样|通过|重点|尤其|希望|不要|除了|排除|避免|不是|案例|理论|地标|路径|机制/.test(t);
   if (hasDetailClause) return false;
 
   return explicitKeywords.length === 0 || t.length <= 24;
@@ -76,6 +81,19 @@ export function attachExplicitInferredPartitions(
 ): StructuredDemandContext {
   const text = promptText.trim();
   const extracted = extractCoreConditionsFromText(text);
+  const negatives = mergeNegativeConstraints(
+    {
+      excludedTopics: extracted.excludedTopics,
+      excludedKeywords: extracted.excludedKeywords,
+      excludedConcepts: extracted.excludedConcepts,
+    },
+    {
+      excludedTopics: demand.excludedTopics,
+      excludedKeywords: demand.excludedKeywords,
+      excludedConcepts: demand.excludedConcepts,
+    },
+  );
+  const positiveText = maskNegativeSpans(text);
 
   const manualTopics =
     input.themes !== undefined ? clampThemes(input.themes) : [];
@@ -86,30 +104,45 @@ export function attachExplicitInferredPartitions(
       ? clampPreferences(input.preferences)
       : [];
 
+  // 只承认正向文本中出现的题材；否定片段里的词进 excludedTopics
   let explicitTopics = uniq([
     ...manualTopics,
     ...extracted.themes,
-    ...demand.topics.filter((t) => text.includes(t)),
+    ...demand.topics.filter((t) => positiveText.includes(t)),
   ]);
-  explicitTopics = clampThemes(explicitTopics);
+  explicitTopics = stripExcludedFromTopics(
+    clampThemes(explicitTopics),
+    negatives.excludedTopics,
+  );
+
+  const banKw = new Set([
+    ...negatives.excludedTopics,
+    ...negatives.excludedKeywords,
+    ...negatives.excludedConcepts,
+  ]);
 
   let explicitKeywords = uniq([
     ...manualKeywords,
     ...extracted.keywords,
     ...demand.keywords.filter(
-      (k) => text.includes(k) || k === text || text.includes(k.slice(0, 2)),
+      (k) =>
+        positiveText.includes(k) ||
+        k === positiveText ||
+        positiveText.includes(k.slice(0, 2)),
     ),
-  ]);
-  // 不把原文整句 seed 进 explicitKeywords；LLM/手选 keywords 才算
+  ]).filter((k) => !banKw.has(k));
   explicitKeywords = clampKeywords(
     explicitKeywords.filter((k) => !explicitTopics.includes(k) && !BROAD.has(k)),
   );
 
-  const inferredTopics = clampThemes(
-    demand.topics.filter((t) => !explicitTopics.includes(t)),
+  const inferredTopics = stripExcludedFromTopics(
+    clampThemes(demand.topics.filter((t) => !explicitTopics.includes(t))),
+    negatives.excludedTopics,
   );
   const inferredKeywords = clampKeywords(
-    demand.keywords.filter((k) => !explicitKeywords.includes(k)),
+    demand.keywords.filter(
+      (k) => !explicitKeywords.includes(k) && !banKw.has(k),
+    ),
   );
 
   const manualGoals = clampGoals(
@@ -119,7 +152,6 @@ export function attachExplicitInferredPartitions(
         ? [input.goal.trim()]
         : [],
   );
-  // goals 有定义（含 []）→ 手选优先；否则并上原文命中
   const textGoals = goalsMentionedInText(text);
   const explicitGoals =
     input.goals !== undefined || input.goal !== undefined
@@ -141,7 +173,6 @@ export function attachExplicitInferredPartitions(
     explicitStyles,
   );
 
-  // 宽短：评分/展示只用 explicit；inferred 仅留字段供 debug，不并进 topics/keywords
   if (broad) {
     const topics =
       explicitTopics.length > 0 ? explicitTopics : demand.topics.slice(0, 1);
@@ -169,6 +200,7 @@ export function attachExplicitInferredPartitions(
         input.session_bucket !== undefined && input.session_bucket !== null
           ? input.session_bucket
           : extracted.session_bucket ?? null,
+      ...negatives,
       searchQueries:
         searchQueries.length > 0 ? searchQueries : topics.slice(0, 2),
       intentConfidence: Math.min(demand.intentConfidence ?? 0.45, 0.5),
@@ -186,9 +218,9 @@ export function attachExplicitInferredPartitions(
     inferredTopics,
     explicitKeywords,
     inferredKeywords,
-    // 目标/偏好：只保留用户明确说的或手选；未说则空
     goal: explicitGoal,
     goals: explicitGoals,
     styles: explicitStyles,
+    ...negatives,
   };
 }

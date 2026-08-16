@@ -25,7 +25,7 @@ import {
 import type { ExploreBook, ExploreFilters } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-/** MVP：本地目录分页，不无限下拉、不反复 call 外部 API */
+/** 本地目录分页：滚动触底再加载，不点按钮 */
 const PAGE_SIZE = 6;
 
 export function ExplorePageClient({ books }: { books: ExploreBook[] }) {
@@ -43,6 +43,7 @@ export function ExplorePageClient({ books }: { books: ExploreBook[] }) {
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [, startTransition] = useTransition();
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     void getProfile()
@@ -79,6 +80,23 @@ export function ExplorePageClient({ books }: { books: ExploreBook[] }) {
       scrollRef.current?.scrollTo({ top: 0 });
     });
   };
+
+  // 列表滚动触底 → 自动加载下一批
+  useEffect(() => {
+    const root = scrollRef.current;
+    const target = loadMoreRef.current;
+    if (!root || !target || !hasMore || !profileReady) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        setVisibleCount((n) => Math.min(n + PAGE_SIZE, ranked.length));
+      },
+      { root, rootMargin: "120px 0px", threshold: 0 },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMore, profileReady, ranked.length, feed.length]);
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background">
@@ -228,20 +246,17 @@ export function ExplorePageClient({ books }: { books: ExploreBook[] }) {
                   已显示 {feed.length} / {ranked.length}
                 </p>
                 {hasMore ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setVisibleCount((n) =>
-                        Math.min(n + PAGE_SIZE, ranked.length),
-                      )
-                    }
-                    className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:border-primary/30 hover:text-primary"
+                  <div
+                    ref={loadMoreRef}
+                    className="flex items-center gap-2 py-1 text-xs text-muted-foreground"
+                    aria-hidden
                   >
-                    加载更多
-                  </button>
+                    <Loader2 className="size-3.5 animate-spin" />
+                    继续下滑加载
+                  </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    已到本地目录末尾（MVP 暂不请求更多书源）
+                    已到本地目录末尾
                   </p>
                 )}
               </div>

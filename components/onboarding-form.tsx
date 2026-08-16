@@ -20,6 +20,7 @@ import {
   Users,
 } from "lucide-react";
 
+import { OnboardingRedirectOverlay } from "@/components/recommend-loading-overlay";
 import { Button } from "@/components/ui/button";
 import { getProfile, saveProfile } from "@/lib/data";
 import type { ReadingDepth } from "@/lib/types";
@@ -258,6 +259,7 @@ export function OnboardingForm() {
   const [intensity, setIntensity] = useState("");
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
   const [loading, setLoading] = useState(true);
   /** 已有必填画像 → 修改语气；否则首次建立 */
   const [isEdit, setIsEdit] = useState(false);
@@ -348,6 +350,7 @@ export function OnboardingForm() {
       return;
     }
     setSaving(true);
+    setRedirecting(true);
     try {
       await saveProfile({
         roles: selectedRoles,
@@ -355,10 +358,14 @@ export function OnboardingForm() {
         reading_purposes: selectedPurposes,
         reading_depth: (intensity || null) as ReadingDepth | null,
       });
-      router.replace("/");
-      router.refresh();
-    } finally {
+      // 整页进入首页，确保 middleware 重新读到已完成的画像（避免 client 导航仍被拦回 onboarding）
+      window.location.assign("/");
+    } catch (err) {
       setSaving(false);
+      setRedirecting(false);
+      window.alert(
+        err instanceof Error ? err.message : "保存失败，请稍后重试",
+      );
     }
   };
 
@@ -373,6 +380,7 @@ export function OnboardingForm() {
 
   return (
     <div className="mx-auto grid w-full max-w-6xl gap-6 px-4 py-8 lg:grid-cols-[1fr_300px] lg:gap-8 sm:px-6">
+      <OnboardingRedirectOverlay open={redirecting} />
       <div className="space-y-8">
         <div className="space-y-3">
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">
@@ -527,7 +535,7 @@ export function OnboardingForm() {
         </section>
       </div>
 
-      <aside className="lg:sticky lg:top-20 lg:self-start">
+      <aside className="lg:sticky lg:top-6 lg:self-start">
         <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold">已选偏好</h3>
@@ -617,7 +625,7 @@ export function OnboardingForm() {
           <Button
             className="h-11 w-full rounded-xl bg-gradient-to-r from-teal-500 to-sky-500 text-white hover:from-teal-600 hover:to-sky-600 disabled:opacity-60"
             disabled={saving}
-            onClick={handleSubmit}
+            onClick={() => void handleSubmit()}
           >
             {saving
               ? "保存中…"
@@ -625,17 +633,20 @@ export function OnboardingForm() {
                 ? "保存修改 →"
                 : "完成设置，开启专属推荐 →"}
           </Button>
-          <Button
-            variant="outline"
-            className="h-10 w-full rounded-xl"
-            onClick={() => router.push("/")}
-          >
-            {isEdit ? "取消并返回" : "稍后再说"}
-          </Button>
+          {isEdit ? (
+            <Button
+              variant="outline"
+              className="h-10 w-full rounded-xl"
+              disabled={saving}
+              onClick={() => router.push("/")}
+            >
+              取消并返回
+            </Button>
+          ) : null}
           <p className="text-center text-xs text-muted-foreground">
             {isEdit
-              ? "顶栏头像也可再次进入本页修改"
-              : "随时可在「我的偏好」中调整"}
+              ? "保存后返回首页；之后也可从顶栏头像再改"
+              : "完成必选后将进入首页；推荐会按你的画像定制"}
           </p>
         </div>
       </aside>

@@ -61,6 +61,12 @@ export type RecommendContext = {
    * 不进书库 taxonomy，只服务本轮召回与评分。
    */
   keywords?: string[];
+  /** 明确排除的正式题材（query-time；不写回书库） */
+  excludedTopics?: string[];
+  /** 明确排除的自由词 */
+  excludedKeywords?: string[];
+  /** 明确排除的概念（与 excludedKeywords 可重叠） */
+  excludedConcepts?: string[];
   time_horizon?: string;
   /** 单次可读时长（分钟），可用区间中值或上限 */
   session_minutes?: number;
@@ -204,8 +210,12 @@ export type DimensionScores = {
    * 与 matchScore 同值（兼容旧字段）。
    */
   contextMatchScore?: number;
-  /** 排序用：contextMatchScore + Profile 微调 */
+  /** 排序用：contextMatchScore + Profile 微调 − 排除软降权 */
   sortScore?: number;
+  /**
+   * 负向约束软降权（只扣 sortScore，不进 Match% / contextMatchScore）。
+   */
+  exclusionSoftPenalty?: number;
   /** 强相关 / 较相关 / 弱相关（只解释分数） */
   relevanceBand?: "strong" | "medium" | "weak";
   /** @deprecated 请用 contextMatchScore；现等于 contextMatchScore */
@@ -236,7 +246,17 @@ export type StructuredDemandContext = {
   styles: string[];
   difficulty: ReadingDepth | null;
   time: string | null;
+  /**
+   * 遗留粗排除标签（英文/小说/重理论等）。
+   * 题材级排除请用 excludedTopics。
+   */
   exclusions: string[];
+  /** 排除的正式题材：primary_topics 命中则硬过滤 */
+  excludedTopics?: string[];
+  /** 排除的自由关键词：仅降权 / 弱过滤，不进 Match% 加分 */
+  excludedKeywords?: string[];
+  /** 排除的概念：同 excludedKeywords，对齐 book.concepts */
+  excludedConcepts?: string[];
   /** 内部检索用，由 topics + keywords 生成 */
   searchQueries: string[];
   /** 0–1：需求可解析置信度；短/歧义 prompt 应偏低 */

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Bookmark } from "lucide-react";
 
 import { BookmarkSaveModal } from "@/components/bookmark-save-modal";
+import type { CreateTopicPrefill } from "@/components/create-topic-modal";
 import { getBookmark } from "@/lib/data";
 import { cn } from "@/lib/utils";
 
@@ -11,6 +12,8 @@ export function BookmarkButton({
   bookId,
   bookTitle,
   topicId,
+  saveAsTopicPrefill,
+  onTopicCreated,
   className,
   iconClassName,
   label,
@@ -19,8 +22,11 @@ export function BookmarkButton({
 }: {
   bookId: string;
   bookTitle?: string;
-  /** 打开时预选该专题 */
+  /** 打开时预选并提示「当前专题」 */
   topicId?: string | null;
+  /** 与「保存为专题」相同；有推荐 Context 时收藏弹层可走同一流程 */
+  saveAsTopicPrefill?: CreateTopicPrefill | null;
+  onTopicCreated?: (topicId: string) => void;
   className?: string;
   iconClassName?: string;
   label?: string;
@@ -78,6 +84,8 @@ export function BookmarkButton({
         bookId={bookId}
         bookTitle={bookTitle}
         preselectedTopicId={topicId}
+        saveAsTopicPrefill={saveAsTopicPrefill}
+        onTopicCreated={onTopicCreated}
         onClose={() => setOpen(false)}
         onSaved={() => {
           setSaved(true);

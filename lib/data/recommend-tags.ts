@@ -1,4 +1,9 @@
 import { GENRE_TAG_WHITELIST, type GenreTag } from "@/lib/data/book-tags";
+import {
+  extractNegativeConstraints,
+  maskNegativeSpans,
+  stripExcludedFromTopics,
+} from "@/lib/data/recommend/negative-constraints";
 import type { ReadingDepth } from "@/lib/types";
 
 /** MVP：可见条件上限 */
@@ -194,35 +199,39 @@ export type CoreRecommendConditions = {
   goal: string | null;
   /** 原文中明确提到的阅读目标（可多选） */
   goals: string[];
+  excludedTopics: string[];
+  excludedKeywords: string[];
+  excludedConcepts: string[];
 };
 
 /**
  * 规则解析：topics 仅白名单；keywords 自由；负向「不要太理论」→ 少理论（不是理论优先）。
+ * 「除了X以外 / 不要X」等 → excluded*，且 X 不会进入正向 themes。
  */
 export function extractCoreConditionsFromText(
   text: string,
 ): CoreRecommendConditions {
   const source = text.trim();
+  const negatives = extractNegativeConstraints(source);
+  const positiveSource = maskNegativeSpans(source);
 
-  // 负向理论必须先于「理论」正向别名
+  // 负向理论必须先于「理论」正向别名（在全文检测，含「不要太理论」）
   const avoidTheory = /不要\s*太?\s*理论|别\s*太?\s*理论|少\s*理论|轻\s*理论|拒\s*理论/.test(
     source,
   );
   const wantTheory =
-    !avoidTheory && /理论优先|偏理论|要理论|理论向/.test(source);
+    !avoidTheory && /理论优先|偏理论|要理论|理论向/.test(positiveSource);
 
-  const themes = matchFromPool(
-    source,
-    THEME_OPTIONS,
-    THEME_ALIASES,
-    MAX_THEMES,
+  const themes = stripExcludedFromTopics(
+    matchFromPool(positiveSource, THEME_OPTIONS, THEME_ALIASES, MAX_THEMES),
+    negatives.excludedTopics,
   );
 
   const preferences: string[] = [];
   if (avoidTheory) preferences.push("少理论");
   if (wantTheory) preferences.push("理论优先");
   for (const tag of matchFromPool(
-    source,
+    positiveSource,
     PREFERENCE_OPTIONS.filter((p) => p !== "理论优先" && p !== "少理论"),
     PREF_ALIASES,
     MAX_PREFERENCES,
@@ -233,28 +242,32 @@ export function extractCoreConditionsFromText(
   }
 
   const keywords: string[] = [];
+  const banKw = new Set([
+    ...negatives.excludedTopics,
+    ...negatives.excludedKeywords,
+    ...negatives.excludedConcepts,
+  ]);
   const pushKw = (k: string) => {
     const t = k.trim();
-    if (!t || themes.includes(t) || keywords.includes(t)) return;
+    if (!t || themes.includes(t) || keywords.includes(t) || banKw.has(t)) return;
     if (keywords.length < MAX_KEYWORDS) keywords.push(t);
   };
   for (const hint of KEYWORD_HINTS) {
-    if (source.includes(hint)) pushKw(hint);
+    if (positiveSource.includes(hint)) pushKw(hint);
   }
-  // 短名词片段：若原文含「森林关卡」等，拆出非白名单词
-  if (/森林/.test(source)) pushKw("森林");
-  if (/地标/.test(source)) pushKw("地标");
-  if (/迷路/.test(source)) pushKw("迷路");
+  if (/森林/.test(positiveSource)) pushKw("森林");
+  if (/地标/.test(positiveSource)) pushKw("地标");
+  if (/迷路/.test(positiveSource)) pushKw("迷路");
 
   let depth: ReadingDepth | null = null;
-  if (/入门|轻松|翻翻|浅/.test(source)) depth = "light";
-  else if (/深入|啃|硬核/.test(source)) depth = "deep";
-  else if (/中等|认真|系统学/.test(source)) depth = "medium";
+  if (/入门|轻松|翻翻|浅/.test(positiveSource)) depth = "light";
+  else if (/深入|啃|硬核/.test(positiveSource)) depth = "deep";
+  else if (/中等|认真|系统学/.test(positiveSource)) depth = "medium";
 
   let session_bucket: string | null = null;
-  if (/15\s*[-–~到至]?\s*30|半小时内|20\s*分钟/.test(source)) {
+  if (/15\s*[-–~到至]?\s*30|半小时内|20\s*分钟/.test(positiveSource)) {
     session_bucket = "30";
-  } else if (/30\s*[-–~到至]?\s*60|一小时|45\s*分钟/.test(source)) {
+  } else if (/30\s*[-–~到至]?\s*60|一小时|45\s*分钟/.test(positiveSource)) {
     session_bucket = "60";
   }
 
@@ -262,18 +275,26 @@ export function extractCoreConditionsFromText(
   const pushGoal = (g: string) => {
     if (!goals.includes(g) && goals.length < MAX_GOALS) goals.push(g);
   };
-  // 仅明确目的词；「我想了解」不会命中
-  if (/工作调研|调研|查资料/.test(source)) pushGoal("工作调研");
-  if (/找灵感|灵感|找创意/.test(source)) pushGoal("找灵感");
-  if (/快速入门|上手/.test(source)) pushGoal("快速入门");
-  if (/系统学习|系统学/.test(source)) pushGoal("系统学习");
-  if (/休闲阅读|休闲读|轻松读/.test(source)) pushGoal("休闲阅读");
+  if (/工作调研|调研|查资料/.test(positiveSource)) pushGoal("工作调研");
+  if (/找灵感|灵感|找创意/.test(positiveSource)) pushGoal("找灵感");
+  if (/快速入门|上手/.test(positiveSource)) pushGoal("快速入门");
+  if (/系统学习|系统学/.test(positiveSource)) pushGoal("系统学习");
+  if (/休闲阅读|休闲读|轻松读/.test(positiveSource)) pushGoal("休闲阅读");
 
   const goal = goals[0] ?? null;
 
-  // 不把整句需求 seed 成 keyword；短意图句交给 LLM 拆「本次关注」
-
-  return { themes, keywords, preferences, depth, session_bucket, goal, goals };
+  return {
+    themes,
+    keywords,
+    preferences,
+    depth,
+    session_bucket,
+    goal,
+    goals,
+    excludedTopics: negatives.excludedTopics,
+    excludedKeywords: negatives.excludedKeywords,
+    excludedConcepts: negatives.excludedConcepts,
+  };
 }
 
 /**

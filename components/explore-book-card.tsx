@@ -3,39 +3,13 @@
 import Link from "next/link";
 import { Star } from "lucide-react";
 
+import { BookCover } from "@/components/book-cover";
 import { BookmarkButton } from "@/components/bookmark-button";
 import { bookDetailHref, type BookDetailFrom } from "@/lib/book-links";
 import type { ExploreBook } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export type ExploreViewMode = "stack" | "grid";
-
-function Cover({ book, className }: { book: ExploreBook; className?: string }) {
-  if (book.cover_url) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={book.cover_url}
-        alt={book.title}
-        className={cn(
-          "aspect-[2/3] shrink-0 rounded-md object-cover shadow-sm",
-          className,
-        )}
-      />
-    );
-  }
-  return (
-    <div
-      className={cn(
-        "flex aspect-[2/3] shrink-0 items-end justify-center rounded-md px-1 pb-2 text-center text-[9px] font-semibold leading-tight text-white shadow-sm",
-        className,
-      )}
-      style={{ backgroundColor: book.cover_color ?? "#64748b" }}
-    >
-      {book.title.slice(0, 6)}
-    </div>
-  );
-}
 
 /** Grid 模式：横向紧凑卡 */
 function GridBookCard({
@@ -56,7 +30,13 @@ function GridBookCard({
         className,
       )}
     >
-      <Cover book={book} className="w-14 text-[8px] sm:w-16" />
+      <BookCover
+        title={book.title}
+        coverUrl={book.cover_url}
+        color={book.cover_color}
+        className="w-14 rounded-md text-[8px] sm:w-16"
+        titleChars={6}
+      />
       <div className="min-w-0 flex-1 space-y-1.5">
         <div>
           <h3 className="line-clamp-2 text-sm leading-snug font-semibold text-slate-900">
@@ -117,7 +97,13 @@ export function ExploreBookCard({
         href={bookDetailHref(book.id, { from })}
         className="flex gap-4 rounded-xl border border-slate-200 bg-white p-4 transition-colors hover:border-primary/30"
       >
-        <Cover book={book} className="w-[4.75rem] text-[10px] sm:w-[5.5rem]" />
+        <BookCover
+          title={book.title}
+          coverUrl={book.cover_url}
+          color={book.cover_color}
+          className="w-[4.75rem] rounded-md text-[10px] sm:w-[5.5rem]"
+          titleChars={6}
+        />
         <div className="min-w-0 flex-1 space-y-2 pr-8">
           <div>
             <h3 className="text-base font-semibold text-slate-900 sm:text-lg">
