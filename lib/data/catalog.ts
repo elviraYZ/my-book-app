@@ -19,6 +19,51 @@ const CATALOG_LIMIT = 5000;
 const WORK_WITH_EDITIONS =
   "*, book_editions!book_editions_work_id_fkey(*)";
 
+/** 探索列表：少字段，减轻嵌套 editions 体积 */
+const WORK_LIST_SELECT = [
+  "id",
+  "canonical_title",
+  "primary_author",
+  "topics",
+  "primary_topics",
+  "difficulty",
+  "content_style",
+  "display_summary",
+  "use_cases",
+  "concepts",
+  "created_at",
+  "representative_edition_id",
+  "book_editions!book_editions_work_id_fkey(id, external_id, title, cover_url, description, page_count, rating, ratings_count, preview_url, info_url, published_date, publisher, isbn_13, isbn_10, language)",
+].join(",");
+
+export type CatalogBooksPage = {
+  books: Book[];
+  nextOffset: number;
+  hasMore: boolean;
+};
+
+function filterMockCatalog(options: {
+  genreTags?: string[];
+  difficulties?: string[];
+}): Book[] {
+  let books = mockCatalog();
+  const tags = options.genreTags ?? [];
+  const difficulties = options.difficulties ?? [];
+  if (tags.length > 0) {
+    books = books.filter((b) =>
+      tags.some((tag) =>
+        b.tags.some((t) => t.includes(tag) || tag.includes(t)),
+      ),
+    );
+  }
+  if (difficulties.length > 0) {
+    books = books.filter(
+      (b) => b.difficulty != null && difficulties.includes(b.difficulty),
+    );
+  }
+  return books;
+}
+
 function exploreToBook(book: ExploreBook): Book {
   return {
     id: book.id,
@@ -47,7 +92,7 @@ function mockCatalog(): Book[] {
   return [...byId.values()];
 }
 
-/** api：works + 代表版；mock：本地种子 */
+/** api：works + 代表版；mock：本地种子（推荐等仍可能用全集） */
 export async function listCatalogBooks(): Promise<Book[]> {
   if (isMockMode()) return mockCatalog();
 
@@ -66,6 +111,59 @@ export async function listCatalogBooks(): Promise<Book[]> {
     if (book) books.push(book);
   }
   return books;
+}
+
+/** 探索分页：按 created_at 倒序；可选题材 overlaps */
+export async function listCatalogBooksPage(options: {
+  offset?: number;
+  limit?: number;
+  genreTags?: string[];
+  difficulties?: string[];
+} = {}): Promise<CatalogBooksPage> {
+  const offset = Math.max(0, options.offset ?? 0);
+  const limit = Math.min(Math.max(1, options.limit ?? 36), 100);
+  const genreTags = options.genreTags?.filter(Boolean) ?? [];
+  const difficulties = options.difficulties?.filter(Boolean) ?? [];
+
+  if (isMockMode()) {
+    const all = filterMockCatalog({ genreTags, difficulties });
+    const slice = all.slice(offset, offset + limit);
+    return {
+      books: slice,
+      nextOffset: offset + slice.length,
+      hasMore: offset + slice.length < all.length,
+    };
+  }
+
+  const supabase = await createDataClient();
+  let query = supabase
+    .from("works")
+    .select(WORK_LIST_SELECT)
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (genreTags.length > 0) {
+    query = query.overlaps("topics", genreTags);
+  }
+  if (difficulties.length > 0) {
+    query = query.in("difficulty", difficulties);
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+
+  const rows = (data ?? []) as unknown as DbWorkRow[];
+  const books: Book[] = [];
+  for (const row of rows) {
+    const book = mapWorkToBook(row);
+    if (book) books.push(book);
+  }
+
+  return {
+    books,
+    nextOffset: offset + rows.length,
+    hasMore: rows.length === limit,
+  };
 }
 
 export async function getCatalogBook(id: string): Promise<{

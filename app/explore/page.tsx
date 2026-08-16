@@ -1,11 +1,8 @@
 import { Suspense } from "react";
 
 import { ExplorePageClient } from "@/components/explore-page-client";
-import { listExploreBooks } from "@/lib/data";
 
-export default async function ExplorePage() {
-  const books = await listExploreBooks();
-
+export default function ExplorePage() {
   return (
     <Suspense
       fallback={
@@ -14,7 +11,7 @@ export default async function ExplorePage() {
         </div>
       }
     >
-      <ExplorePageClient books={books} />
+      <ExplorePageClient />
     </Suspense>
   );
 }

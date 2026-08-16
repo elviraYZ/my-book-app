@@ -67,7 +67,7 @@ function NewSearchModal({
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const placeholder = useRotatingPlaceholder("例如：想系统学习游戏设计方法论");
+  const placeholder = useRotatingPlaceholder("说说你想看什么…");
   const { percent, label, overlayOpen, finish, dismiss } =
     useEstimatedRecommendProgress(loading);
 
@@ -208,7 +208,7 @@ function NewSearchModal({
           </form>
 
           <SuggestPromptRotator
-            className="mt-4"
+            className="mt-3"
             label="试试这样问"
             disabled={loading}
             onPick={(text) => {

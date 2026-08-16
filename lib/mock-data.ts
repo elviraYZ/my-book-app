@@ -61,8 +61,7 @@ export const mockBooks: Book[] = [
     id: "book-levelup",
     title: "Level Up! 游戏设计精髓",
     author: "Scott Rogers",
-    description:
-      "从关卡节奏到敌人配置，用大量实战案例讲透游戏设计方法。",
+    description: "从关卡节奏到敌人配置，用大量实战案例讲透游戏设计方法。",
     tags: ["关卡设计", "实践案例", "20-30分钟"],
     reading_minutes: 25,
     difficulty: "light",
@@ -106,7 +105,8 @@ export const mockTopics: Topic[] = [
     id: "topic-explore-level",
     user_id: "user-demo",
     title: "探索性关卡设计方法",
-    context_text: "围绕探索节奏、奖励分布与迷路乐趣，整理可落地的关卡设计方法。",
+    context_text:
+      "围绕探索节奏、奖励分布与迷路乐趣，整理可落地的关卡设计方法。",
     context: {
       goal: "掌握探索性关卡设计",
       themes: ["关卡设计", "探索体验"],
@@ -133,7 +133,8 @@ export const mockTopics: Topic[] = [
     title: "森林关卡空间引导",
     context_text: "研究开放森林关卡中地标、路径与玩家导航的设计方法。",
     context: {
-      raw_prompt: "我这周想快速了解关卡中的空间引导，希望案例多一点，不要太理论。",
+      raw_prompt:
+        "我这周想快速了解关卡中的空间引导，希望案例多一点，不要太理论。",
       goal: "学习空间引导",
       themes: ["关卡设计", "玩家导航", "空间引导"],
       time_horizon: "本周",
@@ -305,7 +306,8 @@ export const mockExploreBooks: ExploreBook[] = [
     difficulty: "light",
     reading_minutes: 20,
     content_style: ["theory", "case"] as ContentStyle[],
-    description: "从日常物品出发讲清可用性与用户心智模型，适合产品与关卡引导参考。",
+    description:
+      "从日常物品出发讲清可用性与用户心智模型，适合产品与关卡引导参考。",
   },
   {
     id: "book-cialdini",
@@ -317,7 +319,8 @@ export const mockExploreBooks: ExploreBook[] = [
     difficulty: "medium",
     reading_minutes: 35,
     content_style: ["theory", "case"] as ContentStyle[],
-    description: "揭示互惠、承诺、社会认同等说服原则，可迁移到新手引导与留存设计。",
+    description:
+      "揭示互惠、承诺、社会认同等说服原则，可迁移到新手引导与留存设计。",
   },
   {
     id: "book-threebody",
@@ -343,7 +346,7 @@ export const mockExploreBooks: ExploreBook[] = [
     reading_minutes: b.reading_minutes ?? null,
     content_style: (b.content_style ?? []) as ContentStyle[],
     description: b.description ?? null,
-  })
+  }),
 );
 
 export const mockExplore: ExploreItem[] = [
@@ -427,8 +430,7 @@ export const mockTopicBooks: Record<string, TopicBook[]> = {
     makeTopicBook("tb-el-4", "topic-explore-level", "book-schell", {
       rank: 4,
       match_score: 90,
-      match_reason:
-        "设计透镜可帮你系统拆解探索动机；篇幅适合中等投入阅读。",
+      match_reason: "设计透镜可帮你系统拆解探索动机；篇幅适合中等投入阅读。",
       user_status: null,
     }),
     makeTopicBook("tb-el-5", "topic-explore-level", "book-flow", {
@@ -505,7 +507,8 @@ export const mockTopicBooks: Record<string, TopicBook[]> = {
     makeTopicBook("tb-ai-1", "topic-ai-level", "book-schell", {
       rank: 1,
       match_score: 80,
-      match_reason: "用设计透镜评估 AI 生成内容是否「好玩」而非只是「能生成」。",
+      match_reason:
+        "用设计透镜评估 AI 生成内容是否「好玩」而非只是「能生成」。",
       user_status: "bookmarked",
     }),
     makeTopicBook("tb-ai-2", "topic-ai-level", "book-levelup", {
@@ -562,8 +565,7 @@ export const mockTopicBooks: Record<string, TopicBook[]> = {
 export const mockRecommendationSession: RecommendationSession = {
   id: "session-demo",
   user_id: "user-demo",
-  raw_prompt:
-    "我这周想快速了解关卡中的空间引导，希望案例多一点，不要太理论。",
+  raw_prompt: "我这周想快速了解关卡中的空间引导，希望案例多一点，不要太理论。",
   context: mockTopics[0].context,
   created_at: "2026-08-12T02:20:00Z",
 };
@@ -673,12 +675,11 @@ export const mockBookDetails: Record<
 };
 
 /**
- * 首页 / 新搜索：偏「完整需求」的短句（一行展示会截断，点击填入全文）。
- * 文案参考常见 AI 对话示例：场景 + 目标，比单关键词更清晰。
+ * 首页 / 新搜索：偏「完整需求」的短句；列表一行一条，点击填入全文。
  */
 export const suggestPrompts = [
-  "想系统学游戏设计：玩法、原型和平衡",
-  "关卡里玩家容易迷路，想学空间引导",
+  "我在做一个东方神话题材的游戏世界，想找一些世界观设定和视觉风格参考",
+  "我想优化游戏的核心玩法和产品体验，不要太理论，适合短时间参考的",
 ] as const;
 
 export const exploreFilters = [

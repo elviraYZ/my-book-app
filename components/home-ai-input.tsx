@@ -28,7 +28,7 @@ export function HomeAiInput() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [spotlight, setSpotlight] = useState(false);
-  const placeholder = useRotatingPlaceholder("例如：想系统学习游戏设计方法论");
+  const placeholder = useRotatingPlaceholder("说说你想看什么…");
   const { percent, label, overlayOpen, finish, dismiss } =
     useEstimatedRecommendProgress(loading);
 
@@ -96,7 +96,7 @@ export function HomeAiInput() {
     <div
       id="home-ai"
       className={cn(
-        "scroll-mt-24 space-y-4 rounded-2xl transition-shadow duration-500",
+        "scroll-mt-24 space-y-3 rounded-2xl transition-shadow duration-500",
         spotlight &&
           "ring-2 ring-sky-300/80 ring-offset-4 ring-offset-sky-50/80",
       )}

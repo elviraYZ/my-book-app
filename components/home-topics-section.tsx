@@ -15,10 +15,7 @@ import {
 
 import { NewSearchButton } from "@/components/new-search-provider";
 import { buttonVariants } from "@/components/ui/button";
-import {
-  BOOKMARKS_CHANGED,
-  TOPICS_CHANGED,
-} from "@/lib/data-events";
+import { BOOKMARKS_CHANGED, TOPICS_CHANGED } from "@/lib/data-events";
 import { listTopics } from "@/lib/data";
 import type { Topic } from "@/lib/types";
 import { cn } from "@/lib/utils";

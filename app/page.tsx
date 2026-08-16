@@ -7,13 +7,11 @@ import { HomeExploreSection } from "@/components/home-explore-section";
 import { HomeTopicsSection } from "@/components/home-topics-section";
 import { SiteHeader } from "@/components/site-header";
 import { buttonVariants } from "@/components/ui/button";
-import { listExploreBooks } from "@/lib/data";
 import type { Topic } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export default async function HomePage() {
-  // 专题在客户端 hydrate（避免 SSR 引入 supabase/server → next/headers）
-  const exploreBooks = await listExploreBooks();
+export default function HomePage() {
+  // 专题 / 探索均在客户端按登录态拉取，避免 SSR 盲拉最新书
   const topics: Topic[] = [];
 
   return (
@@ -21,17 +19,17 @@ export default async function HomePage() {
       <SiteHeader active="home" />
       <div className="mx-auto w-full max-w-6xl space-y-6 px-4 py-8 sm:px-6">
         {/* Hero */}
-        <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-sky-50 via-blue-50 to-indigo-50 px-6 py-10 sm:px-10 sm:py-12">
+        <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-sky-50 via-blue-50 to-indigo-50 px-6 py-8 sm:px-10 sm:py-10">
           <div className="pointer-events-none absolute -top-16 -right-10 size-56 rounded-full bg-sky-200/40 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-20 left-10 size-48 rounded-full bg-blue-200/30 blur-3xl" />
 
           <div className="relative grid items-center gap-8 lg:grid-cols-[1.2fr_0.8fr]">
-            <div className="space-y-7">
-              <div className="space-y-3.5">
+            <div className="space-y-4">
+              <div className="space-y-2">
                 <h1 className="text-[1.75rem] font-bold tracking-tight text-[#111827] sm:text-[2.25rem] sm:leading-tight">
                   今天想看什么书？
                 </h1>
-                <p className="max-w-xl text-sm leading-relaxed text-slate-600 sm:text-base">
+                <p className="max-w-xl text-sm text-slate-500 sm:text-[15px]">
                   输入想法，帮你找到合适的书，也把思路留下来。
                 </p>
               </div>
@@ -58,7 +56,7 @@ export default async function HomePage() {
           </div>
         </section>
 
-        <HomeExploreSection books={exploreBooks} />
+        <HomeExploreSection />
 
         <HomeTopicsSection initialTopics={topics} />
 

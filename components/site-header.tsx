@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { Bell, BookOpen } from "lucide-react";
+import { Bell, BookOpen, Search } from "lucide-react";
 
 import { AuthNav } from "@/components/auth-nav";
 import {
   ComingSoonHost,
   showComingSoon,
 } from "@/components/coming-soon";
+import { useNewSearchOptional } from "@/components/new-search-provider";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +28,7 @@ export function SiteHeader({
   active = "none",
   variant = "default",
 }: SiteHeaderProps) {
+  const { openNewSearch } = useNewSearchOptional();
   const activeHref =
     active === "home"
       ? "/"
@@ -82,6 +84,15 @@ export function SiteHeader({
               </nav>
 
               <div className="ml-auto flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => openNewSearch()}
+                  className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-primary"
+                  aria-label="AI 搜索"
+                  title="AI 搜索"
+                >
+                  <Search className="size-4" />
+                </button>
                 <button
                   type="button"
                   onClick={() => showComingSoon("通知中心开发中，敬请期待")}

@@ -21,7 +21,9 @@ export {
 } from "@/lib/data/topics";
 
 export {
+  EXPLORE_PAGE_SIZE,
   listExploreBooks,
+  listExploreBooksPage,
   listExploreItems,
   getExploreFilters,
   getSuggestPrompts,
@@ -38,6 +40,7 @@ export {
 } from "@/lib/data/explore";
 export type {
   ActiveFilterChip,
+  ExploreBooksPage,
   ExploreFilterKey,
   GenreFilterGroup,
   GenreFilterOption,
@@ -65,6 +68,7 @@ export {
   PROFILE_INTEREST_OPTIONS,
   mapInterestsToBookTags,
   rankByInterestTags,
+  filterByExploreTagGate,
   takeRotatedSlice,
 } from "@/lib/data/interest-map";
 

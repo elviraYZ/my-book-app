@@ -11,8 +11,8 @@ import {
 import { ExploreSidebar } from "@/components/explore-sidebar";
 import { SiteHeader } from "@/components/site-header";
 import {
+  EXPLORE_PAGE_SIZE,
   emptyExploreFilters,
-  filterExploreBooks,
   filtersFromSearchParams,
   filtersToSearchParams,
   getActiveFilterChips,
@@ -20,30 +20,62 @@ import {
   mapInterestsToBookTags,
   rankByInterestTags,
   removeFilterValue,
-  takeRotatedSlice,
 } from "@/lib/data";
 import type { ExploreBook, ExploreFilters } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-/** 本地目录分页：滚动触底再加载，不点按钮 */
-const PAGE_SIZE = 6;
+type ExplorePageResponse = {
+  books: ExploreBook[];
+  nextOffset: number;
+  hasMore: boolean;
+  error?: string;
+};
 
-export function ExplorePageClient({ books }: { books: ExploreBook[] }) {
+async function fetchExplorePage(
+  filters: ExploreFilters,
+  offset: number,
+  options?: {
+    limit?: number;
+    interestTags?: string[];
+    signal?: AbortSignal;
+  },
+): Promise<ExplorePageResponse> {
+  const qs = filtersToSearchParams(filters);
+  qs.set("offset", String(offset));
+  qs.set("limit", String(options?.limit ?? EXPLORE_PAGE_SIZE));
+  if (options?.interestTags?.length) {
+    qs.set("interestTags", options.interestTags.join(","));
+  }
+  const res = await fetch(`/api/explore?${qs}`, { signal: options?.signal });
+  const data = (await res.json()) as ExplorePageResponse;
+  if (!res.ok) {
+    throw new Error(data.error ?? "加载失败");
+  }
+  return data;
+}
+
+export function ExplorePageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [filters, setFilters] = useState<ExploreFilters>(() =>
     filtersFromSearchParams(searchParams),
   );
-  /** 换一批：批次下标，配合 PAGE_SIZE 做窗口轮换 */
-  const [batch, setBatch] = useState(0);
+  const [books, setBooks] = useState<ExploreBook[]>([]);
+  const [nextOffset, setNextOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [reloading, setReloading] = useState(true);
   const [interestTags, setInterestTags] = useState<string[]>([]);
   const [profileReady, setProfileReady] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [viewMode, setViewMode] = useState<ExploreViewMode>("stack");
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [, startTransition] = useTransition();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const loadLockRef = useRef(false);
+  const interestTagsRef = useRef<string[]>([]);
+  interestTagsRef.current = interestTags;
 
   useEffect(() => {
     void getProfile()
@@ -56,47 +88,123 @@ export function ExplorePageClient({ books }: { books: ExploreBook[] }) {
       .finally(() => setProfileReady(true));
   }, []);
 
-  const ranked = useMemo(() => {
-    const filtered = filterExploreBooks(books, filters);
-    return rankByInterestTags(filtered, interestTags);
-  }, [books, filters, interestTags]);
-
   const feed = useMemo(
-    () => takeRotatedSlice(ranked, batch * PAGE_SIZE, visibleCount),
-    [ranked, batch, visibleCount],
+    () => rankByInterestTags(books, interestTags),
+    [books, interestTags],
   );
-  const hasMore = visibleCount < ranked.length;
-  const canRotate = ranked.length > PAGE_SIZE;
   const chips = useMemo(() => getActiveFilterChips(filters), [filters]);
+
+  const reloadFromStart = async (
+    nextFilters: ExploreFilters,
+    tags: string[] = interestTagsRef.current,
+  ) => {
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    setReloading(true);
+    try {
+      const page = await fetchExplorePage(nextFilters, 0, {
+        limit: EXPLORE_PAGE_SIZE,
+        interestTags: tags,
+        signal: ac.signal,
+      });
+      setBooks(page.books);
+      setNextOffset(page.nextOffset);
+      setHasMore(page.hasMore);
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return;
+      setBooks([]);
+      setNextOffset(0);
+      setHasMore(false);
+    } finally {
+      setReloading(false);
+    }
+  };
+
+  // 画像就绪后再拉：无侧栏题材时按兴趣标签收窄，避免首屏「最新入库」跑偏
+  useEffect(() => {
+    if (!profileReady) return;
+    void reloadFromStart(filters);
+    // 仅在画像首次就绪时拉；改筛选走 updateFilters
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- bootstrap once
+  }, [profileReady]);
 
   const updateFilters = (next: ExploreFilters) => {
     startTransition(() => {
       setFilters(next);
-      setBatch(0);
-      setVisibleCount(PAGE_SIZE);
       const qs = filtersToSearchParams(next);
       const path = qs.toString() ? `/explore?${qs}` : "/explore";
       router.replace(path, { scroll: false });
       scrollRef.current?.scrollTo({ top: 0 });
+      void reloadFromStart(next);
     });
   };
 
-  // 列表滚动触底 → 自动加载下一批
+  const loadMore = async () => {
+    if (!hasMore || loadingMore || reloading || loadLockRef.current) return;
+    loadLockRef.current = true;
+    setLoadingMore(true);
+    try {
+      const page = await fetchExplorePage(filters, nextOffset, {
+        interestTags: interestTagsRef.current,
+      });
+      setBooks((prev) => {
+        const seen = new Set(prev.map((b) => b.id));
+        const appended = page.books.filter((b) => !seen.has(b.id));
+        return [...prev, ...appended];
+      });
+      setNextOffset(page.nextOffset);
+      setHasMore(page.hasMore);
+    } catch {
+      // keep current list
+    } finally {
+      setLoadingMore(false);
+      loadLockRef.current = false;
+    }
+  };
+
+  const rotateBatch = async () => {
+    if (reloading || loadingMore) return;
+    scrollRef.current?.scrollTo({ top: 0 });
+    if (!hasMore) {
+      void reloadFromStart(filters);
+      return;
+    }
+    setReloading(true);
+    try {
+      const page = await fetchExplorePage(filters, nextOffset, {
+        interestTags: interestTagsRef.current,
+      });
+      if (page.books.length === 0) {
+        await reloadFromStart(filters);
+        return;
+      }
+      setBooks(page.books);
+      setNextOffset(page.nextOffset);
+      setHasMore(page.hasMore);
+    } catch {
+      // keep current
+    } finally {
+      setReloading(false);
+    }
+  };
+
   useEffect(() => {
     const root = scrollRef.current;
     const target = loadMoreRef.current;
-    if (!root || !target || !hasMore || !profileReady) return;
+    if (!root || !target || !hasMore || !profileReady || reloading) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries[0]?.isIntersecting) return;
-        setVisibleCount((n) => Math.min(n + PAGE_SIZE, ranked.length));
+        void loadMore();
       },
-      { root, rootMargin: "120px 0px", threshold: 0 },
+      { root, rootMargin: "160px 0px", threshold: 0 },
     );
     observer.observe(target);
     return () => observer.disconnect();
-  }, [hasMore, profileReady, ranked.length, feed.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadMore closes over latest offset/filters
+  }, [hasMore, profileReady, reloading, nextOffset, feed.length, filters]);
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background">
@@ -109,27 +217,25 @@ export function ExplorePageClient({ books }: { books: ExploreBook[] }) {
               探索
             </h1>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              {profileReady
-                ? `共 ${ranked.length} 本 · 可按题材方向筛选`
-                : "加载书目…"}
+              {!profileReady || reloading
+                ? "按你的兴趣加载书目…"
+                : interestTags.length > 0 && filters.genres.length === 0
+                  ? `已加载 ${feed.length} 本（按兴趣）${hasMore ? " · 下滑继续" : ""}`
+                  : `已加载 ${feed.length} 本${hasMore ? " · 下滑继续" : ""}`}
             </p>
           </div>
           <div className="flex items-center gap-1.5">
             <button
               type="button"
-              disabled={!profileReady || !canRotate}
-              onClick={() =>
-                startTransition(() => {
-                  setBatch((b) => b + 1);
-                  setVisibleCount(PAGE_SIZE);
-                  scrollRef.current?.scrollTo({ top: 0 });
-                })
-              }
+              disabled={!profileReady || reloading || feed.length === 0}
+              onClick={() => void rotateBatch()}
               className="inline-flex size-9 items-center justify-center rounded-full border border-slate-200 bg-white text-muted-foreground hover:border-primary/30 hover:text-foreground disabled:opacity-40"
               aria-label="换一批"
-              title={canRotate ? "换一批" : "书目不足，暂无下一批"}
+              title="换一批"
             >
-              <RefreshCw className="size-3.5" />
+              <RefreshCw
+                className={cn("size-3.5", reloading && "animate-spin")}
+              />
             </button>
             <div className="hidden items-center rounded-full border border-slate-200 p-0.5 sm:flex">
               <button
@@ -207,23 +313,24 @@ export function ExplorePageClient({ books }: { books: ExploreBook[] }) {
             ref={scrollRef}
             className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
           >
-            {!profileReady ? (
+            {!profileReady || reloading ? (
               <div className="flex items-center gap-2 py-16 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
                 加载书目…
               </div>
-            ) : ranked.length === 0 ? (
+            ) : feed.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-200 px-4 py-16 text-center text-sm text-muted-foreground">
                 没有符合筛选的书，试试放宽条件
               </div>
             ) : viewMode === "grid" ? (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {feed.map((book) => (
                   <ExploreBookCard
-                    key={`${book.id}-${batch}`}
+                    key={book.id}
                     book={book}
                     mode="grid"
                     from="explore"
+                    className="h-full"
                   />
                 ))}
               </div>
@@ -231,7 +338,7 @@ export function ExplorePageClient({ books }: { books: ExploreBook[] }) {
               <div className="space-y-3">
                 {feed.map((book) => (
                   <ExploreBookCard
-                    key={`${book.id}-${batch}`}
+                    key={book.id}
                     book={book}
                     mode="stack"
                     from="explore"
@@ -240,10 +347,10 @@ export function ExplorePageClient({ books }: { books: ExploreBook[] }) {
               </div>
             )}
 
-            {ranked.length > 0 ? (
+            {feed.length > 0 && !reloading ? (
               <div className="flex flex-col items-center gap-2 py-6">
                 <p className="text-xs text-muted-foreground">
-                  已显示 {feed.length} / {ranked.length}
+                  已显示 {feed.length} 本
                 </p>
                 {hasMore ? (
                   <div
@@ -251,13 +358,16 @@ export function ExplorePageClient({ books }: { books: ExploreBook[] }) {
                     className="flex items-center gap-2 py-1 text-xs text-muted-foreground"
                     aria-hidden
                   >
-                    <Loader2 className="size-3.5 animate-spin" />
-                    继续下滑加载
+                    <Loader2
+                      className={cn(
+                        "size-3.5",
+                        loadingMore ? "animate-spin" : "opacity-40",
+                      )}
+                    />
+                    {loadingMore ? "加载中…" : "继续下滑加载"}
                   </div>
                 ) : (
-                  <p className="text-xs text-muted-foreground">
-                    已到本地目录末尾
-                  </p>
+                  <p className="text-xs text-muted-foreground">已到目录末尾</p>
                 )}
               </div>
             ) : null}

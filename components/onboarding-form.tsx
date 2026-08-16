@@ -282,14 +282,14 @@ export function OnboardingForm() {
           // 首次：给一组温和默认，降低空白页压力
           setSelectedRoles(["design"]);
           setSelectedPurposes(["solve", "learn"]);
-          setSelectedInterests(["游戏设计", "关卡设计", "引擎开发"]);
+          setSelectedInterests(["游戏设计", "关卡设计", "美术设定"]);
           setIntensity("light");
         }
       } catch {
         if (!cancelled) {
           setSelectedRoles(["design"]);
           setSelectedPurposes(["solve", "learn"]);
-          setSelectedInterests(["游戏设计", "关卡设计", "引擎开发"]);
+          setSelectedInterests(["游戏设计", "关卡设计", "美术设定"]);
           setIntensity("light");
         }
       } finally {
