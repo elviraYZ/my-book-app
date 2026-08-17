@@ -30,28 +30,44 @@ function LoginForm() {
     setLoading(true);
     setMessage(null);
     const supabase = createClient();
+    const emailTrimmed = email.trim();
+    const dest = next.startsWith("/") ? next : "/";
 
     try {
       if (mode === "signin") {
         const { error } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
+          email: emailTrimmed,
           password,
         });
         if (error) throw error;
       } else {
-        const { error } = await supabase.auth.signUp({
-          email: email.trim(),
+        const { data, error } = await supabase.auth.signUp({
+          email: emailTrimmed,
           password,
         });
         if (error) throw error;
-        setMessage("注册成功。若开启了邮箱确认，请先查收邮件再登录。");
+
+        // 多数项目关闭邮箱确认时 signUp 已带 session；否则再密码登录一次
+        if (!data.session) {
+          const { error: signInError } = await supabase.auth.signInWithPassword({
+            email: emailTrimmed,
+            password,
+          });
+          if (signInError) {
+            setMessage("注册成功。请查收确认邮件后再登录。");
+            setMode("signin");
+            setLoading(false);
+            return;
+          }
+        }
+        setMessage("注册成功，正在登录…");
       }
+
       // 门禁由 proxy 根据画像完成度再分流到 /onboarding 或业务页
-      router.replace(next.startsWith("/") ? next : "/");
+      router.replace(dest);
       router.refresh();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "登录失败");
-    } finally {
       setLoading(false);
     }
   };
@@ -112,7 +128,13 @@ function LoginForm() {
           className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#4F5DFF] text-[14px] font-semibold text-white hover:opacity-95 disabled:opacity-60"
         >
           {loading ? <Loader2 className="size-4 animate-spin" /> : null}
-          {mode === "signin" ? "登录" : "注册"}
+          {loading
+            ? mode === "signup"
+              ? "注册成功，正在登录…"
+              : "登录中…"
+            : mode === "signin"
+              ? "登录"
+              : "注册并登录"}
         </button>
       </form>
 
