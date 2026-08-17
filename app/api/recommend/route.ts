@@ -48,6 +48,7 @@ export async function POST(request: Request) {
         depth: body.depth,
         session_bucket: body.session_bucket,
         special_notes: body.special_notes,
+        initial_topics: body.initial_topics,
         profile: body.profile,
       },
       {

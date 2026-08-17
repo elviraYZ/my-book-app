@@ -430,12 +430,23 @@ async function runRecommendPipelineInner(
   const contextSpecificity = evaluateContextSpecificity(demand, demandText);
   const sessionFields = bucketToSession(demand.time);
 
+  // UI 快照：首次解析写入；rerun 带回 initial_topics 则原样保留
+  const initialTopics =
+    input.initial_topics !== undefined
+      ? clampThemes(input.initial_topics)
+      : clampThemes(
+          demand.explicitTopics?.length
+            ? demand.explicitTopics
+            : demand.topics,
+        );
+
   const context: RecommendContext = {
     raw_prompt: demandText || demand.topics.join("、"),
     turns,
     goal: demand.goal,
     goals: demand.goals ?? (demand.goal ? [demand.goal] : []),
     themes: demand.topics,
+    initialTopics,
     keywords: demand.keywords,
     excludedTopics: demand.excludedTopics,
     excludedKeywords: demand.excludedKeywords,

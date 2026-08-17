@@ -45,6 +45,10 @@ import {
   updateTopic,
 } from "@/lib/data";
 import { DISLIKED_CHANGED } from "@/lib/data-events";
+import {
+  shouldWarnTopicDrift,
+  TOPIC_DRIFT_HINT,
+} from "@/lib/data/recommend/topic-drift";
 import type { ReadingDepth, RecommendResponse, TopicBook } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { COVERAGE_TIP, REFINEMENT_TIP } from "@/lib/data/recommend/weights";
@@ -378,6 +382,8 @@ export function RecommendPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const abortRef = useRef<AbortController | null>(null);
+  /** 首次搜索主题快照（UI 偏离提示）；不随重新推荐覆盖 */
+  const initialTopicsRef = useRef<string[] | null>(null);
   const [result, setResult] = useState<RecommendResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [savedTopicId, setSavedTopicId] = useState<string | null>(null);
@@ -401,7 +407,6 @@ export function RecommendPageClient() {
   const [selectedSession, setSelectedSession] = useState("");
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [newSearchOpen, setNewSearchOpen] = useState(false);
-  const [editingDemand, setEditingDemand] = useState(false);
   const [demandExpanded, setDemandExpanded] = useState(false);
   const [saveTopicOpen, setSaveTopicOpen] = useState(false);
 
@@ -431,6 +436,13 @@ export function RecommendPageClient() {
       }
       setResult(data);
       syncFromResult(data);
+      if (!initialTopicsRef.current) {
+        initialTopicsRef.current = clampThemes(
+          data.context.initialTopics?.length
+            ? data.context.initialTopics
+            : (data.context.themes ?? []),
+        );
+      }
       const topicId = data.context.topic_id ?? topicFromQuery;
       if (topicId) setSavedTopicId(topicId);
       setLoading(false);
@@ -507,19 +519,20 @@ export function RecommendPageClient() {
     return selectedDepth !== origDepth || selectedSession !== origSession;
   }, [result, selectedDepth, selectedSession]);
 
-  const demandDirty = useMemo(() => {
-    if (!result) return false;
-    return demandText.trim() !== demandTextFromResult(result).trim();
-  }, [result, demandText]);
-
   const conditionsDirty = tagsDirty || constraintsDirty;
-  const canApply = conditionsDirty || demandDirty;
+  const canApply = conditionsDirty;
 
-  const discardDemand = () => {
-    if (!result) return;
-    setDemandText(demandTextFromResult(result));
-    setEditingDemand(false);
-  };
+  const topicDriftHint = useMemo(() => {
+    const initial =
+      initialTopicsRef.current ??
+      clampThemes(result?.context.initialTopics ?? []);
+    if (
+      shouldWarnTopicDrift(initial, selectedThemes)
+    ) {
+      return TOPIC_DRIFT_HINT;
+    }
+    return null;
+  }, [result, selectedThemes]);
 
   const discardConditions = () => {
     if (!result) return;
@@ -533,20 +546,6 @@ export function RecommendPageClient() {
     const bucket = sessionBucketFromContext(result);
     setSelectedSession(bucket === "30" || bucket === "60" ? bucket : "");
     setAdjustOpen(false);
-  };
-
-  const startEditDemand = () => {
-    if (editingDemand) {
-      setEditingDemand(false);
-      return;
-    }
-    setEditingDemand(true);
-    setDemandExpanded(true);
-  };
-
-  const onDemandChange = (text: string) => {
-    // 只改需求原文；主题/关注等由 LLM 分析后回填，勿用规则整句 seed
-    setDemandText(text);
   };
 
   const toggleTheme = (tag: string) => {
@@ -664,31 +663,50 @@ export function RecommendPageClient() {
           depth: selectedDepth || null,
           session_bucket: selectedSession || null,
           topic_id: topicId,
+          initial_topics:
+            initialTopicsRef.current ??
+            result.context.initialTopics ??
+            [],
         },
         { signal: controller.signal },
       );
 
       if (controller.signal.aborted) return;
 
+      const snapshot =
+        initialTopicsRef.current ??
+        clampThemes(result.context.initialTopics ?? []);
+      if (!initialTopicsRef.current) {
+        initialTopicsRef.current = snapshot;
+      }
+      const dataWithSnapshot: RecommendResponse = {
+        ...data,
+        context: {
+          ...data.context,
+          initialTopics: snapshot.length
+            ? snapshot
+            : data.context.initialTopics,
+        },
+      };
+
       if (topicId) {
         const existing = await getTopic(topicId);
         await updateTopic(topicId, {
           context_text: text || selectedThemes.join("、"),
           context: {
-            ...data.context,
-            goal: existing?.title ?? data.context.goal,
+            ...dataWithSnapshot.context,
+            goal: existing?.title ?? dataWithSnapshot.context.goal,
             topic_id: topicId,
           },
           title: existing?.title,
         });
-        await syncTopicRecommendations(topicId, data.books);
+        await syncTopicRecommendations(topicId, dataWithSnapshot.books);
       }
 
-      setResult(data);
-      syncFromResult(data);
+      setResult(dataWithSnapshot);
+      syncFromResult(dataWithSnapshot);
       setShowAllAlts(false);
       setAdjustOpen(false);
-      setEditingDemand(false);
       setDemandExpanded(false);
       await finishRerunProgress();
     } catch (err) {
@@ -813,11 +831,6 @@ export function RecommendPageClient() {
           <>
             <DemandEditorBar
               demandText={demandText}
-              onDemandChange={onDemandChange}
-              editingDemand={editingDemand}
-              onToggleEditDemand={startEditDemand}
-              demandDirty={demandDirty}
-              onDiscardDemand={discardDemand}
               demandExpanded={demandExpanded}
               onToggleDemandExpanded={() => setDemandExpanded((v) => !v)}
               selectedThemes={selectedThemes}
@@ -837,6 +850,7 @@ export function RecommendPageClient() {
               onDiscardConditions={discardConditions}
               adjustOpen={adjustOpen}
               onAdjustOpenChange={setAdjustOpen}
+              topicDriftHint={topicDriftHint}
               totalCount={totalCount}
               disabled={rerunning}
               actions={
@@ -896,8 +910,8 @@ export function RecommendPageClient() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-[12px] text-[#8B95A8]">
                 {canApply
-                  ? "有未应用改动；可在对应区块「撤销」，或点「重新推荐」刷新"
-                  : "可编辑需求 / 调整条件；全新需求请「开启新搜索」"}
+                  ? "有未应用改动；可在「调整条件」中撤销，或点「重新推荐」"
+                  : "可通过「调整条件」改标签；改整段需求请「开启新搜索」"}
               </p>
               <div className="inline-flex rounded-lg border border-[#E6EAF2] bg-white p-0.5">
                 <button

@@ -19,7 +19,11 @@ import {
   clampThemes,
   extractCoreConditionsFromText,
 } from "@/lib/data/recommend-tags";
-import type { RecommendRequest, StructuredDemandContext } from "@/lib/types";
+import type {
+  ReadingDepth,
+  RecommendRequest,
+  StructuredDemandContext,
+} from "@/lib/types";
 
 function uniq(items: string[]): string[] {
   const out: string[] = [];
@@ -73,6 +77,9 @@ export function isBroadExplicitQuery(
 /**
  * 在最终 demand 上挂载 explicit / inferred 分区。
  * 宽短 query：topics/keywords/goal/styles 评分面只保留 explicit。
+ *
+ * MVP：请求里某一维已带手改（themes/keywords/goals/preferences/depth/session）时，
+ * 该维只认手动值，不再从原文抽取结果合并旧值。
  */
 export function attachExplicitInferredPartitions(
   promptText: string,
@@ -95,21 +102,29 @@ export function attachExplicitInferredPartitions(
   );
   const positiveText = maskNegativeSpans(text);
 
-  const manualTopics =
-    input.themes !== undefined ? clampThemes(input.themes) : [];
-  const manualKeywords =
-    input.keywords !== undefined ? clampKeywords(input.keywords) : [];
-  const manualStyles =
-    input.preferences !== undefined
-      ? clampPreferences(input.preferences)
-      : [];
+  const themesManual = input.themes !== undefined;
+  const keywordsManual = input.keywords !== undefined;
+  const goalsManual =
+    input.goals !== undefined || input.goal !== undefined;
+  const stylesManual = input.preferences !== undefined;
+  const depthManual = input.depth !== undefined;
+  const timeManual = input.session_bucket !== undefined;
 
-  // 只承认正向文本中出现的题材；否定片段里的词进 excludedTopics
-  let explicitTopics = uniq([
-    ...manualTopics,
-    ...extracted.themes,
-    ...demand.topics.filter((t) => positiveText.includes(t)),
-  ]);
+  const manualTopics = themesManual ? clampThemes(input.themes ?? []) : [];
+  const manualKeywords = keywordsManual
+    ? clampKeywords(input.keywords ?? [])
+    : [];
+  const manualStyles = stylesManual
+    ? clampPreferences(input.preferences ?? [])
+    : [];
+
+  // 手改题材：只认手动；否则才从原文 / LLM 可证实片段合并
+  let explicitTopics = themesManual
+    ? manualTopics
+    : uniq([
+        ...extracted.themes,
+        ...demand.topics.filter((t) => positiveText.includes(t)),
+      ]);
   explicitTopics = stripExcludedFromTopics(
     clampThemes(explicitTopics),
     negatives.excludedTopics,
@@ -121,29 +136,35 @@ export function attachExplicitInferredPartitions(
     ...negatives.excludedConcepts,
   ]);
 
-  let explicitKeywords = uniq([
-    ...manualKeywords,
-    ...extracted.keywords,
-    ...demand.keywords.filter(
-      (k) =>
-        positiveText.includes(k) ||
-        k === positiveText ||
-        positiveText.includes(k.slice(0, 2)),
-    ),
-  ]).filter((k) => !banKw.has(k));
+  let explicitKeywords = keywordsManual
+    ? manualKeywords
+    : uniq([
+        ...extracted.keywords,
+        ...demand.keywords.filter(
+          (k) =>
+            positiveText.includes(k) ||
+            k === positiveText ||
+            positiveText.includes(k.slice(0, 2)),
+        ),
+      ]).filter((k) => !banKw.has(k));
   explicitKeywords = clampKeywords(
     explicitKeywords.filter((k) => !explicitTopics.includes(k) && !BROAD.has(k)),
   );
 
-  const inferredTopics = stripExcludedFromTopics(
-    clampThemes(demand.topics.filter((t) => !explicitTopics.includes(t))),
-    negatives.excludedTopics,
-  );
-  const inferredKeywords = clampKeywords(
-    demand.keywords.filter(
-      (k) => !explicitKeywords.includes(k) && !banKw.has(k),
-    ),
-  );
+  // 手改过的维：不再把 LLM 多出来的同维 inferred 合回评分面
+  const inferredTopics = themesManual
+    ? []
+    : stripExcludedFromTopics(
+        clampThemes(demand.topics.filter((t) => !explicitTopics.includes(t))),
+        negatives.excludedTopics,
+      );
+  const inferredKeywords = keywordsManual
+    ? []
+    : clampKeywords(
+        demand.keywords.filter(
+          (k) => !explicitKeywords.includes(k) && !banKw.has(k),
+        ),
+      );
 
   const manualGoals = clampGoals(
     input.goals !== undefined
@@ -153,17 +174,22 @@ export function attachExplicitInferredPartitions(
         : [],
   );
   const textGoals = goalsMentionedInText(text);
-  const explicitGoals =
-    input.goals !== undefined || input.goal !== undefined
-      ? manualGoals
-      : clampGoals([...manualGoals, ...textGoals]);
+  const explicitGoals = goalsManual
+    ? manualGoals
+    : clampGoals([...manualGoals, ...textGoals]);
   const explicitGoal = explicitGoals[0] ?? "";
 
   const textStyles = stylesMentionedInText(text);
-  const explicitStyles =
-    input.preferences !== undefined
-      ? manualStyles
-      : uniq([...manualStyles, ...textStyles]);
+  const explicitStyles = stylesManual
+    ? manualStyles
+    : uniq([...manualStyles, ...textStyles]);
+
+  const difficulty: ReadingDepth | null = depthManual
+    ? (input.depth ?? null)
+    : (extracted.depth ?? demand.difficulty ?? null);
+  const time: string | null = timeManual
+    ? (input.session_bucket ?? null)
+    : (extracted.session_bucket ?? demand.time ?? null);
 
   const broad = isBroadExplicitQuery(
     text,
@@ -192,14 +218,8 @@ export function attachExplicitInferredPartitions(
       goal: explicitGoal,
       goals: explicitGoals,
       styles: explicitStyles,
-      difficulty:
-        input.depth !== undefined && input.depth !== null
-          ? input.depth
-          : extracted.depth ?? null,
-      time:
-        input.session_bucket !== undefined && input.session_bucket !== null
-          ? input.session_bucket
-          : extracted.session_bucket ?? null,
+      difficulty,
+      time,
       ...negatives,
       searchQueries:
         searchQueries.length > 0 ? searchQueries : topics.slice(0, 2),
@@ -221,6 +241,8 @@ export function attachExplicitInferredPartitions(
     goal: explicitGoal,
     goals: explicitGoals,
     styles: explicitStyles,
+    difficulty,
+    time,
     ...negatives,
   };
 }

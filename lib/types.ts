@@ -57,6 +57,11 @@ export type RecommendContext = {
   /** 正式主题（canonical taxonomy） */
   themes?: string[];
   /**
+   * 首次搜索解析出的核心主题快照（仅 UI「偏离原始需求」提示用）。
+   * 不参与召回 / 评分；重新推荐时应原样带回。
+   */
+  initialTopics?: string[];
+  /**
    * 本次关注：具体场景/对象/问题（如森林、空间引导）。
    * 不进书库 taxonomy，只服务本轮召回与评分。
    */
@@ -337,6 +342,10 @@ export type RecommendRequest = {
   previous_turns?: ContextTurn[];
   /** 用户在结果页调整后的正式主题（白名单） */
   themes?: string[];
+  /**
+   * 首次解析主题快照（UI 提示用）；重新推荐时原样传入，pipeline 不改评分逻辑。
+   */
+  initial_topics?: string[];
   /** 本次关注（自由词，可编辑） */
   keywords?: string[];
   /** 阅读目标（可多选；与 goal 二选一，goals 优先） */

@@ -28,6 +28,7 @@ import {
 import { SiteHeader } from "@/components/site-header";
 import { bookDetailHref } from "@/lib/book-links";
 import {
+  clampKeywords,
   clampPreferences,
   clampThemes,
   deleteTopic,
@@ -35,6 +36,7 @@ import {
   ensureContextTurns,
   FILTER_SECTION_LABELS,
   getTopic,
+  MAX_KEYWORDS,
   MAX_PREFERENCES,
   MAX_THEMES,
   PREFERENCE_OPTIONS,
@@ -46,6 +48,10 @@ import {
   updateTopic,
 } from "@/lib/data";
 import { emitTopicsChanged } from "@/lib/data-events";
+import {
+  shouldWarnTopicDrift,
+  TOPIC_DRIFT_HINT,
+} from "@/lib/data/recommend/topic-drift";
 import { TOPIC_ICONS } from "@/lib/topic-icons";
 import type { ReadingDepth, Topic, TopicBook } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -249,7 +255,6 @@ export function TopicDetailClient({
 }) {
   const router = useRouter();
   const recommendPanelRef = useRef<HTMLElement | null>(null);
-  const composeTextRef = useRef<HTMLTextAreaElement>(null);
   const shouldScrollToRecommend = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -275,6 +280,9 @@ export function TopicDetailClient({
   const [selectedThemes, setSelectedThemes] = useState(() =>
     clampThemes(initialTopic.context.themes ?? []),
   );
+  const [selectedKeywords, setSelectedKeywords] = useState(() =>
+    clampKeywords(initialTopic.context.keywords ?? []),
+  );
   const [selectedPreferences, setSelectedPreferences] = useState(() =>
     clampPreferences(initialTopic.context.preferences ?? []),
   );
@@ -285,14 +293,17 @@ export function TopicDetailClient({
     const bucket = sessionBucketFromTopic(initialTopic);
     return bucket === "30" || bucket === "60" ? bucket : "";
   });
+  const [keywordDraft, setKeywordDraft] = useState("");
 
   const syncEditorFromTopic = (t: Topic) => {
     setDemandText(demandTextFromTopic(t));
     setSelectedThemes(clampThemes(t.context.themes ?? []));
+    setSelectedKeywords(clampKeywords(t.context.keywords ?? []));
     setSelectedPreferences(clampPreferences(t.context.preferences ?? []));
     setSelectedDepth(t.context.depth ?? "");
     const bucket = sessionBucketFromTopic(t);
     setSelectedSession(bucket === "30" || bucket === "60" ? bucket : "");
+    setKeywordDraft("");
   };
 
   useEffect(() => {
@@ -309,7 +320,6 @@ export function TopicDetailClient({
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const raf = requestAnimationFrame(() => setComposeReady(true));
-    const t = window.setTimeout(() => composeTextRef.current?.focus(), 80);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !saving) {
         syncEditorFromTopic(topic);
@@ -320,7 +330,6 @@ export function TopicDetailClient({
     return () => {
       document.body.style.overflow = prev;
       cancelAnimationFrame(raf);
-      window.clearTimeout(t);
       window.removeEventListener("keydown", onKey);
     };
   }, [composeOpen, saving, topic]);
@@ -354,19 +363,16 @@ export function TopicDetailClient({
   const bookmarkedCount = topic.bookmarked_count ?? bookmarked.length;
   const recommendCount = recommended.length;
 
-  const demandDirty = useMemo(
-    () => demandText.trim() !== demandTextFromTopic(topic).trim(),
-    [demandText, topic],
-  );
-
   const tagsDirty = useMemo(() => {
     const ot = clampThemes(topic.context.themes ?? []).sort();
+    const ok = clampKeywords(topic.context.keywords ?? []).sort();
     const op = clampPreferences(topic.context.preferences ?? []).sort();
     return (
       JSON.stringify(ot) !== JSON.stringify([...selectedThemes].sort()) ||
+      JSON.stringify(ok) !== JSON.stringify([...selectedKeywords].sort()) ||
       JSON.stringify(op) !== JSON.stringify([...selectedPreferences].sort())
     );
-  }, [topic, selectedThemes, selectedPreferences]);
+  }, [topic, selectedThemes, selectedKeywords, selectedPreferences]);
 
   const constraintsDirty = useMemo(() => {
     const origDepth = topic.context.depth ?? "";
@@ -375,11 +381,18 @@ export function TopicDetailClient({
     return selectedDepth !== origDepth || selectedSession !== origSession;
   }, [topic, selectedDepth, selectedSession]);
 
-  const canApply = demandDirty || tagsDirty || constraintsDirty;
+  const canApply = tagsDirty || constraintsDirty;
 
-  const onDemandChange = (text: string) => {
-    setDemandText(text);
-  };
+  const topicDriftHint = useMemo(() => {
+    const initial = clampThemes(
+      topic.context.initialTopics?.length
+        ? topic.context.initialTopics
+        : (topic.context.themes ?? []),
+    );
+    return shouldWarnTopicDrift(initial, selectedThemes)
+      ? TOPIC_DRIFT_HINT
+      : null;
+  }, [topic, selectedThemes]);
 
   const toggleTheme = (tag: string) => {
     setSelectedThemes((prev) => {
@@ -387,6 +400,20 @@ export function TopicDetailClient({
       if (prev.length >= MAX_THEMES) return prev;
       return [...prev, tag];
     });
+  };
+
+  const addKeyword = (tag: string) => {
+    const t = tag.trim();
+    if (!t) return;
+    setSelectedKeywords((prev) => {
+      if (prev.includes(t) || selectedThemes.includes(t)) return prev;
+      if (prev.length >= MAX_KEYWORDS) return prev;
+      return [...prev, t];
+    });
+  };
+
+  const removeKeyword = (tag: string) => {
+    setSelectedKeywords((prev) => prev.filter((t) => t !== tag));
   };
 
   const togglePreference = (tag: string) => {
@@ -446,20 +473,33 @@ export function TopicDetailClient({
         {
           prompt,
           themes: selectedThemes,
+          keywords: selectedKeywords,
           preferences: selectedPreferences,
           depth: selectedDepth || null,
           session_bucket: selectedSession || null,
           topic_id: topic.id,
+          initial_topics: clampThemes(
+            topic.context.initialTopics?.length
+              ? topic.context.initialTopics
+              : (topic.context.themes ?? []),
+          ),
         },
         { signal: controller.signal },
       );
 
       if (controller.signal.aborted) return;
 
+      const initialTopics = clampThemes(
+        topic.context.initialTopics?.length
+          ? topic.context.initialTopics
+          : (topic.context.themes ?? []),
+      );
+
       const updated = await updateTopic(topic.id, {
         context_text: prompt,
         context: {
           ...data.context,
+          initialTopics,
           goal: topic.title,
           topic_id: topic.id,
         },
@@ -532,23 +572,10 @@ export function TopicDetailClient({
   const demandPreview = demandTextFromTopic(topic);
   const themeList = clampThemes(topic.context.themes ?? []);
   const preferenceList = clampPreferences(topic.context.preferences ?? []);
-  const keywordList = (topic.context.keywords ?? [])
-    .map((k) => k.trim())
-    .filter(Boolean)
-    .slice(0, 8);
+  const keywordList = clampKeywords(topic.context.keywords ?? []);
   const depthLabel =
     DEPTH_OPTIONS.find((o) => o.value === topic.context.depth)?.label ?? null;
   const timeLabel = sessionLabel(topic);
-  const goalList = (topic.context.goals ?? [])
-    .map((g) => g.trim())
-    .filter(Boolean);
-  // goal 若只是专题标题，不算独立「阅读目标」展示
-  const goalExtra = (topic.context.goal ?? "").trim();
-  const showGoal =
-    goalList.length > 0 ||
-    (goalExtra &&
-      goalExtra !== topic.title.trim() &&
-      goalExtra !== demandPreview.trim());
 
   const headerCard = (
     <section className="shrink-0 rounded-2xl border border-[#E6EAF2] bg-white px-5 py-5 shadow-[0_1px_2px_rgba(31,41,55,0.04)] sm:px-6 sm:py-5">
@@ -631,8 +658,8 @@ export function TopicDetailClient({
           </div>
         </div>
 
-        {/* 其余条件一行 4 列 */}
-        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        {/* 其余条件一行 3 列 */}
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           <div className="rounded-xl border border-[#EEF1F6] px-3 py-2">
             <p className="text-[11px] font-semibold text-[#8B95A8]">内容偏好</p>
             {preferenceList.length > 0 ? (
@@ -661,23 +688,6 @@ export function TopicDetailClient({
             <p className="mt-1.5 text-[13px] font-medium text-[#1F2937]">
               {timeLabel}
             </p>
-          </div>
-          <div className="rounded-xl border border-[#EEF1F6] px-3 py-2">
-            <p className="text-[11px] font-semibold text-[#8B95A8]">阅读目标</p>
-            {showGoal ? (
-              <div className="mt-1.5 flex flex-wrap gap-1">
-                {(goalList.length > 0 ? goalList : [goalExtra]).map((g) => (
-                  <span
-                    key={g}
-                    className="rounded-md bg-[#FFF7ED] px-1.5 py-0.5 text-[11px] font-medium text-[#C2410C]"
-                  >
-                    {g}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p className="mt-1.5 text-[12px] text-[#C5CAD6]">未设置</p>
-            )}
           </div>
         </div>
       </div>
@@ -804,7 +814,7 @@ export function TopicDetailClient({
               编辑并重新生成
             </h2>
             <p className="mt-1 text-[12px] leading-relaxed text-[#6B7280]">
-              改文本、标签和阅读约束后点「重新生成」。已收藏书籍不受影响。
+              调整标签和阅读约束后点「重新生成」。已收藏书籍不受影响。
             </p>
           </div>
           <button
@@ -820,35 +830,12 @@ export function TopicDetailClient({
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 sm:px-6">
           <div>
-            <div className="mb-1.5 flex items-center justify-between gap-2">
-              <p className="text-[13px] font-semibold text-[#111827]">
-                当前需求
-                {demandDirty ? (
-                  <span className="ml-1.5 text-[11px] font-medium text-amber-600">
-                    已编辑
-                  </span>
-                ) : null}
-              </p>
-              {demandDirty ? (
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => setDemandText(demandTextFromTopic(topic))}
-                  className="text-[11px] font-semibold text-[#6B7280] hover:text-[#DC2626]"
-                >
-                  撤销文本
-                </button>
-              ) : null}
-            </div>
-            <textarea
-              ref={composeTextRef}
-              value={demandText}
-              onChange={(e) => onDemandChange(e.target.value)}
-              disabled={saving}
-              rows={5}
-              placeholder="描述本专题的阅读需求…"
-              className="min-h-[132px] w-full resize-none rounded-2xl border border-[#C9D4FF] bg-[#F8F9FF] px-3.5 py-3 text-[15px] leading-relaxed text-[#111827] outline-none placeholder:text-[#A8B0C0] disabled:opacity-60 sm:text-[16px]"
-            />
+            <p className="mb-1.5 text-[13px] font-semibold text-[#111827]">
+              当前需求
+            </p>
+            <p className="max-h-36 overflow-y-auto whitespace-pre-wrap rounded-2xl border border-[#EEF1F6] bg-[#F8FAFC] px-3.5 py-3 text-[14px] leading-relaxed text-[#4B5568] sm:text-[15px]">
+              {demandText.trim() || "（暂无需求原文）"}
+            </p>
           </div>
 
           <div>
@@ -867,6 +854,9 @@ export function TopicDetailClient({
                   disabled={saving}
                   onClick={() => {
                     setSelectedThemes(clampThemes(topic.context.themes ?? []));
+                    setSelectedKeywords(
+                      clampKeywords(topic.context.keywords ?? []),
+                    );
                     setSelectedPreferences(
                       clampPreferences(topic.context.preferences ?? []),
                     );
@@ -875,6 +865,7 @@ export function TopicDetailClient({
                     setSelectedSession(
                       bucket === "30" || bucket === "60" ? bucket : "",
                     );
+                    setKeywordDraft("");
                   }}
                   className="text-[11px] font-semibold text-[#6B7280] hover:text-[#DC2626]"
                 >
@@ -882,6 +873,15 @@ export function TopicDetailClient({
                 </button>
               ) : null}
             </div>
+
+            {topicDriftHint ? (
+              <p
+                className="mb-2 rounded-lg border border-amber-200/80 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-snug text-amber-800"
+                role="status"
+              >
+                {topicDriftHint}
+              </p>
+            ) : null}
 
             <div className="space-y-3 rounded-2xl border border-[#E6EAF2] bg-[#FAFBFD] p-3 sm:p-3.5">
               <div>
@@ -910,6 +910,64 @@ export function TopicDetailClient({
                       </button>
                     );
                   })}
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-1.5 text-[11px] font-medium text-[#8B95A8]">
+                  关键词 ({selectedKeywords.length}/{MAX_KEYWORDS})
+                </p>
+                <div className="mb-1.5 flex flex-wrap gap-1.5">
+                  {selectedKeywords.length === 0 ? (
+                    <span className="text-[12px] text-[#C5CAD6]">未选择</span>
+                  ) : (
+                    selectedKeywords.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        disabled={saving}
+                        onClick={() => removeKeyword(tag)}
+                        className="inline-flex items-center gap-0.5 rounded-md bg-[#F3F5F9] px-2 py-1 text-[12px] font-medium text-[#5F6B7C] hover:bg-[#E8ECF4]"
+                        title="移除"
+                      >
+                        {tag}
+                        <X className="size-3 opacity-70" />
+                      </button>
+                    ))
+                  )}
+                </div>
+                <div className="flex gap-1.5">
+                  <input
+                    value={keywordDraft}
+                    disabled={
+                      saving || selectedKeywords.length >= MAX_KEYWORDS
+                    }
+                    onChange={(e) => setKeywordDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addKeyword(keywordDraft);
+                        setKeywordDraft("");
+                      }
+                    }}
+                    placeholder="输入后回车添加"
+                    className="h-9 min-w-0 flex-1 rounded-lg border border-[#E6EAF2] bg-white px-2.5 text-[12px] text-[#374151] outline-none placeholder:text-[#C5CAD6] disabled:opacity-50"
+                  />
+                  <button
+                    type="button"
+                    disabled={
+                      saving ||
+                      !keywordDraft.trim() ||
+                      selectedKeywords.length >= MAX_KEYWORDS
+                    }
+                    onClick={() => {
+                      addKeyword(keywordDraft);
+                      setKeywordDraft("");
+                    }}
+                    className="h-9 shrink-0 rounded-lg bg-[#4F5DFF] px-3 text-[12px] font-semibold text-white hover:opacity-95 disabled:opacity-40"
+                  >
+                    添加
+                  </button>
                 </div>
               </div>
 

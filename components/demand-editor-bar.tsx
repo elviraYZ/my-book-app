@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { PencilLine, Plus, Sparkles, X } from "lucide-react";
+import { Plus, Sparkles, X } from "lucide-react";
 
 import {
   DEPTH_OPTIONS,
@@ -25,12 +25,8 @@ export {
 } from "@/lib/data";
 
 export type DemandEditorBarProps = {
+  /** 只读：原始自然语言需求 */
   demandText: string;
-  onDemandChange: (text: string) => void;
-  editingDemand: boolean;
-  onToggleEditDemand: () => void;
-  demandDirty: boolean;
-  onDiscardDemand: () => void;
   demandExpanded: boolean;
   onToggleDemandExpanded: () => void;
   selectedThemes: string[];
@@ -50,6 +46,8 @@ export type DemandEditorBarProps = {
   onDiscardConditions: () => void;
   adjustOpen: boolean;
   onAdjustOpenChange: (open: boolean) => void;
+  /** 条件相对首次主题偏离较大时的 UI 提示（不影响推荐） */
+  topicDriftHint?: string | null;
   totalCount: number;
   actions: ReactNode;
   hint?: string;
@@ -58,11 +56,6 @@ export type DemandEditorBarProps = {
 
 export function DemandEditorBar({
   demandText,
-  onDemandChange,
-  editingDemand,
-  onToggleEditDemand,
-  demandDirty,
-  onDiscardDemand,
   demandExpanded,
   onToggleDemandExpanded,
   selectedThemes,
@@ -82,6 +75,7 @@ export function DemandEditorBar({
   onDiscardConditions,
   adjustOpen,
   onAdjustOpenChange,
+  topicDriftHint,
   totalCount,
   actions,
   hint,
@@ -100,78 +94,29 @@ export function DemandEditorBar({
     <section className="rounded-2xl border border-[#E6EAF2] bg-white shadow-[0_1px_2px_rgba(31,41,55,0.04)]">
       <div className="grid gap-0 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1.45fr)_minmax(7.5rem,0.55fr)_minmax(11rem,0.95fr)] lg:items-stretch">
         <div className="min-w-0 space-y-2 p-4">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-[#EEF2FF] text-[#4F5DFF]">
-                <Sparkles className="size-3.5" />
-              </span>
-              <p className="text-[13px] font-semibold text-[#111827]">
-                当前需求
-                {demandDirty ? (
-                  <span className="ml-1.5 text-[11px] font-medium text-amber-600">
-                    已编辑
-                  </span>
-                ) : null}
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
-              {demandDirty ? (
-                <button
-                  type="button"
-                  disabled={disabled}
-                  onClick={onDiscardDemand}
-                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-[#6B7280] hover:bg-[#FEF2F2] hover:text-[#DC2626]"
-                >
-                  撤销
-                </button>
-              ) : null}
-              <button
-                type="button"
-                disabled={disabled}
-                onClick={onToggleEditDemand}
-                className={cn(
-                  "inline-flex h-8 items-center gap-1 rounded-lg border px-2.5 text-[11px] font-semibold transition-colors",
-                  editingDemand
-                    ? "border-[#4F5DFF] bg-[#EEF2FF] text-[#4F5DFF]"
-                    : "border-[#C9D4FF] bg-white text-[#4F5DFF] hover:bg-[#F5F7FF]",
-                )}
-              >
-                <PencilLine className="size-3.5" />
-                {editingDemand ? "完成编辑" : "编辑需求"}
-              </button>
-            </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-[#EEF2FF] text-[#4F5DFF]">
+              <Sparkles className="size-3.5" />
+            </span>
+            <p className="text-[13px] font-semibold text-[#111827]">当前需求</p>
           </div>
-          {editingDemand ? (
-            <textarea
-              autoFocus
-              value={demandText}
-              onChange={(e) => onDemandChange(e.target.value)}
-              rows={4}
-              disabled={disabled}
-              className="w-full resize-none rounded-xl border border-[#C9D4FF] bg-[#F8F9FF] px-3 py-2 text-[13px] leading-relaxed text-[#374151] outline-none placeholder:text-[#C5CAD6] disabled:opacity-60"
-              placeholder="描述你的阅读需求…"
-            />
-          ) : (
-            <>
-              <p
-                className={cn(
-                  "text-[13px] leading-relaxed text-[#4B5568]",
-                  !demandExpanded && "line-clamp-3",
-                )}
-              >
-                {demandText.trim() || "暂无需求描述"}
-              </p>
-              {demandText.trim().length > 60 ? (
-                <button
-                  type="button"
-                  onClick={onToggleDemandExpanded}
-                  className="text-[12px] font-semibold text-[#4F5DFF] hover:underline"
-                >
-                  {demandExpanded ? "收起" : "查看详情 >"}
-                </button>
-              ) : null}
-            </>
-          )}
+          <p
+            className={cn(
+              "text-[13px] leading-relaxed text-[#4B5568]",
+              !demandExpanded && "line-clamp-3",
+            )}
+          >
+            {demandText.trim() || "暂无需求描述"}
+          </p>
+          {demandText.trim().length > 60 ? (
+            <button
+              type="button"
+              onClick={onToggleDemandExpanded}
+              className="text-[12px] font-semibold text-[#4F5DFF] hover:underline"
+            >
+              {demandExpanded ? "收起" : "查看详情 >"}
+            </button>
+          ) : null}
         </div>
 
         <div className="relative z-20 min-w-0 space-y-1.5 overflow-visible border-t border-[#EEF1F6] p-4 lg:border-t-0 lg:border-l">
@@ -429,6 +374,15 @@ export function DemandEditorBar({
               ) : null}
             </div>
           </div>
+
+          {topicDriftHint ? (
+            <p
+              className="rounded-lg border border-amber-200/80 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-snug text-amber-800"
+              role="status"
+            >
+              {topicDriftHint}
+            </p>
+          ) : null}
 
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-1">
