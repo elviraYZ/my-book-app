@@ -117,7 +117,8 @@ function NewSearchModal({
       await finish();
       if (controller.signal.aborted) return;
       onClose();
-      router.push("/recommend");
+      // 已在 /recommend 时纯 push 同路径不会重挂载；带 v 让结果页重新读缓存
+      router.push(`/recommend?v=${Date.now()}`);
     } catch (err) {
       if (isAbortError(err) || controller.signal.aborted) {
         dismiss();

@@ -78,7 +78,7 @@ export function HomeAiInput() {
       if (controller.signal.aborted) return;
       await finish();
       if (controller.signal.aborted) return;
-      router.push("/recommend");
+      router.push(`/recommend?v=${Date.now()}`);
     } catch (err) {
       if (isAbortError(err) || controller.signal.aborted) {
         dismiss();

@@ -426,25 +426,27 @@ export function RecommendPageClient() {
   useEffect(() => {
     const topicFromQuery = searchParams.get("topic");
     void (async () => {
-      // 首页已跑过 recommend 并写入缓存；此处只读缓存，避免重复打 /api/recommend。
-      // 需要刷新时用页面上的「重新推荐」。
+      // 首页 / 新搜索已写入缓存；此处只读缓存，避免重复打 /api/recommend。
+      // searchParams（含 ?v=）变化时重读，以便同页「开启新搜索」后立刻换结果。
       const data = await getLastRecommend();
       if (!data) {
-        if (topicFromQuery) setSavedTopicId(topicFromQuery);
+        setSavedTopicId(topicFromQuery);
+        setResult(null);
+        initialTopicsRef.current = null;
         setLoading(false);
         return;
       }
+      initialTopicsRef.current = clampThemes(
+        data.context.initialTopics?.length
+          ? data.context.initialTopics
+          : (data.context.themes ?? []),
+      );
       setResult(data);
       syncFromResult(data);
-      if (!initialTopicsRef.current) {
-        initialTopicsRef.current = clampThemes(
-          data.context.initialTopics?.length
-            ? data.context.initialTopics
-            : (data.context.themes ?? []),
-        );
-      }
-      const topicId = data.context.topic_id ?? topicFromQuery;
-      if (topicId) setSavedTopicId(topicId);
+      setSavedTopicId(data.context.topic_id ?? topicFromQuery);
+      setShowAllAlts(false);
+      setAdjustOpen(false);
+      setDemandExpanded(false);
       setLoading(false);
     })();
   }, [searchParams]);
