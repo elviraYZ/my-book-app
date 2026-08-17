@@ -27,6 +27,10 @@ import {
 
 import { BookmarkButton } from "@/components/bookmark-button";
 import { BookCover } from "@/components/book-cover";
+import {
+  createTopicPrefillFromRecommend,
+  type CreateTopicPrefill,
+} from "@/components/create-topic-modal";
 import { SiteHeader } from "@/components/site-header";
 import { bookDetailHref } from "@/lib/book-links";
 import {
@@ -35,6 +39,7 @@ import {
 } from "@/lib/book-external-links";
 import {
   getBookAction,
+  getLastRecommend,
   hideBookFromLastRecommend,
   setBookAction,
 } from "@/lib/data";
@@ -247,6 +252,8 @@ export function BookDetailClient({
   const [dislikePending, setDislikePending] = useState(false);
   const [showAllToc, setShowAllToc] = useState(false);
   const [dislikeError, setDislikeError] = useState<string | null>(null);
+  const [saveAsTopicPrefill, setSaveAsTopicPrefill] =
+    useState<CreateTopicPrefill | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -263,6 +270,28 @@ export function BookDetailClient({
       cancelled = true;
     };
   }, [book.id]);
+
+  /** 仅从推荐入口进详情时，可用上次推荐 Context「保存为专题」 */
+  useEffect(() => {
+    if (from !== "recommend") {
+      setSaveAsTopicPrefill(null);
+      return;
+    }
+    let cancelled = false;
+    void getLastRecommend()
+      .then((data) => {
+        if (cancelled) return;
+        setSaveAsTopicPrefill(
+          data ? createTopicPrefillFromRecommend(data) : null,
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setSaveAsTopicPrefill(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [from]);
 
   const toc = book.toc ?? [];
   const visibleToc = showAllToc ? toc : toc.slice(0, 5);
@@ -360,6 +389,7 @@ export function BookDetailClient({
                 bookId={book.id}
                 bookTitle={book.title}
                 topicId={topicId}
+                saveAsTopicPrefill={saveAsTopicPrefill}
                 variant="button"
                 className="w-full"
               />

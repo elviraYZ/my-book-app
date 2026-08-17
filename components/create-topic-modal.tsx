@@ -3,9 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, X } from "lucide-react";
 
-import { createTopic } from "@/lib/data";
+import { createTopic, ensureContextTurns } from "@/lib/data";
 import { emitTopicsChanged } from "@/lib/data-events";
-import type { RecommendContext, TopicBook } from "@/lib/types";
+import type {
+  RecommendContext,
+  RecommendResponse,
+  TopicBook,
+} from "@/lib/types";
 
 export type CreateTopicPrefill = {
   title?: string;
@@ -22,6 +26,42 @@ function suggestTitleFromText(text: string) {
   if (!cleaned) return "";
   const first = cleaned.split(/[。！？\n]/)[0] ?? cleaned;
   return first.length > 20 ? `${first.slice(0, 20)}…` : first;
+}
+
+function demandTextFromResult(data: RecommendResponse) {
+  const turns = ensureContextTurns(data.context);
+  const joined = turns
+    .map((t) => t.text.trim())
+    .filter(Boolean)
+    .join("\n");
+  return joined || data.context.raw_prompt?.trim() || "";
+}
+
+/** 从上次推荐结果生成「保存为专题」预填（详情页 / 推荐页共用） */
+export function createTopicPrefillFromRecommend(
+  result: RecommendResponse,
+): CreateTopicPrefill | null {
+  const text = demandTextFromResult(result);
+  if (!text.trim()) return null;
+
+  const depth = result.context.depth;
+  const prefChips = [
+    ...(result.context.preferences ?? []),
+    ...(depth === "light" ? ["轻理论", "快速入门"] : []),
+    ...(depth === "medium" ? ["系统学习"] : []),
+  ].filter((v, i, arr) => arr.indexOf(v) === i);
+
+  return {
+    title: result.context.goal ?? "",
+    description: text,
+    timeHorizon: result.context.time_horizon ?? undefined,
+    preferences: prefChips.slice(0, 4),
+    context: {
+      ...result.context,
+      raw_prompt: text,
+    },
+    books: result.books,
+  };
 }
 
 /** 仅从推荐结果保存为专题（不再支持独立创建） */
